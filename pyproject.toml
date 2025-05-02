@@ -3,7 +3,7 @@ name = "lokikit"
 version = "0.1.0"
 description = "Minimal CLI to set up and run a local Loki+Promtail+Grafana stack"
 authors = [{ name = "Gareth Price" }]
-dependencies = ["click", "pyyaml"]
+dependencies = ["click", "pyyaml", "loguru>=0.7.0"]
 
 [project.scripts]
 lokikit = "lokikit.cli:cli"
