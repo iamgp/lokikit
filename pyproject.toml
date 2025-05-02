@@ -1,0 +1,9 @@
+[project]
+name = "lokikit"
+version = "0.1.0"
+description = "Minimal CLI to set up and run a local Loki+Promtail+Grafana stack"
+authors = [{ name = "Gareth Price" }]
+dependencies = ["click"]
+
+[project.scripts]
+lokikit = "lokikit.cli:cli"
