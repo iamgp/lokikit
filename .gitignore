@@ -1,0 +1,14 @@
+*.egg-info
+*.dist-info
+*.whl
+*.tar.gz
+*.zip
+*.tar.xz
+*.tar.bz2
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
