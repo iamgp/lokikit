@@ -1,0 +1,35 @@
+# Sample lokikit configuration file
+# Copy this to lokikit.yaml and modify as needed
+
+# Base directory for lokikit (defaults to ~/.lokikit)
+base_dir: ~/.lokikit
+
+# Network configuration
+host: 127.0.0.1
+grafana_port: 3000
+loki_port: 3100
+promtail_port: 9080
+
+# Promtail configuration
+promtail:
+  # Custom log paths to monitor
+  log_paths:
+  # Simple path format
+  - /var/log/syslog
+
+  # With explicit job name
+  - path: /var/log/auth.log
+    job: auth_logs
+
+  # Full configuration with custom labels
+  - path: ~/my-app/logs/*.log
+    job: my_application
+    labels:
+      environment: development
+      app: my-application
+
+  # Multiple glob patterns
+  - path: /var/log/nginx/*.log
+    job: nginx_logs
+    labels:
+      service: nginx

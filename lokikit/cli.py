@@ -12,6 +12,7 @@ import signal
 import time
 import click
 import socket
+import yaml
 
 DEFAULT_BASE_DIR = os.path.expanduser("~/.lokikit")
 DEFAULT_HOST = "127.0.0.1"
@@ -407,6 +408,35 @@ def wait_for_services(host, ports, procs, timeout=20):
 
     return False
 
+def load_config_file(config_file):
+    """Load configuration from YAML file."""
+    if not os.path.exists(config_file):
+        click.echo(f"Warning: Config file {config_file} not found, using defaults.")
+        return {}
+
+    try:
+        with open(config_file, "r") as f:
+            config = yaml.safe_load(f)
+            return config if config else {}
+    except Exception as e:
+        click.echo(f"Error loading config file: {e}")
+        return {}
+
+def merge_config(cli_options, file_config):
+    """Merge CLI options with file configuration, prioritizing CLI options."""
+    result = {}
+
+    # Start with file config
+    if file_config:
+        result.update(file_config)
+
+    # Override with CLI options (only non-None values)
+    for key, value in cli_options.items():
+        if value is not None:
+            result[key] = value
+
+    return result
+
 @click.group()
 @click.option(
     "--base-dir",
@@ -438,15 +468,41 @@ def wait_for_services(host, ports, procs, timeout=20):
     show_default=True,
     help="Port for Promtail server.",
 )
+@click.option(
+    "--config",
+    default=None,
+    help="Path to YAML configuration file to override default options.",
+)
 @click.pass_context
-def cli(ctx, base_dir, host, port, loki_port, promtail_port):
+def cli(ctx, base_dir, host, port, loki_port, promtail_port, config):
     """lokikit: Minimal Loki+Promtail+Grafana stack launcher."""
     ctx.ensure_object(dict)
-    ctx.obj["BASE_DIR"] = os.path.expanduser(base_dir)
-    ctx.obj["HOST"] = host
-    ctx.obj["GRAFANA_PORT"] = port
-    ctx.obj["LOKI_PORT"] = loki_port
-    ctx.obj["PROMTAIL_PORT"] = promtail_port
+
+    # Load config file if specified
+    file_config = {}
+    if config:
+        file_config = load_config_file(config)
+
+    # Merge CLI options with file config
+    cli_options = {
+        "base_dir": base_dir,
+        "host": host,
+        "grafana_port": port,
+        "loki_port": loki_port,
+        "promtail_port": promtail_port,
+    }
+
+    merged_config = merge_config(cli_options, file_config)
+
+    # Set context values from merged config
+    ctx.obj["BASE_DIR"] = os.path.expanduser(merged_config.get("base_dir", DEFAULT_BASE_DIR))
+    ctx.obj["HOST"] = merged_config.get("host", DEFAULT_HOST)
+    ctx.obj["GRAFANA_PORT"] = merged_config.get("grafana_port", DEFAULT_GRAFANA_PORT)
+    ctx.obj["LOKI_PORT"] = merged_config.get("loki_port", DEFAULT_LOKI_PORT)
+    ctx.obj["PROMTAIL_PORT"] = merged_config.get("promtail_port", DEFAULT_PROMTAIL_PORT)
+
+    # Store all config in context for commands to access
+    ctx.obj["CONFIG"] = merged_config
 
 @cli.command()
 @click.pass_context
@@ -457,6 +513,7 @@ def setup(ctx):
     grafana_port = ctx.obj["GRAFANA_PORT"]
     loki_port = ctx.obj["LOKI_PORT"]
     promtail_port = ctx.obj["PROMTAIL_PORT"]
+    config = ctx.obj["CONFIG"]
 
     ensure_dir(base_dir)
     binaries = get_binaries(base_dir)
@@ -502,11 +559,68 @@ def setup(ctx):
         loki_port=loki_port
     )
 
+    # Get custom Promtail configuration if specified
     promtail_config = PROMTAIL_CONFIG_TEMPLATE.format(
         host=host,
         loki_port=loki_port,
         promtail_port=promtail_port
     )
+
+    # Apply custom log paths if specified in config
+    if "promtail" in config and "log_paths" in config["promtail"]:
+        # Create a modified promtail config with custom log paths
+        custom_targets = []
+        for i, log_path in enumerate(config["promtail"]["log_paths"]):
+            # Extract job name if provided, otherwise use an auto-generated name
+            if isinstance(log_path, dict) and "path" in log_path and "job" in log_path:
+                path = log_path["path"]
+                job = log_path["job"]
+                custom_labels = log_path.get("labels", {})
+            else:
+                # If it's just a string path
+                path = log_path if isinstance(log_path, str) else log_path.get("path", "")
+                job = f"logfile_{i}"
+                custom_labels = {}
+
+            if not path:
+                continue
+
+            # Format labels as YAML
+            labels_yaml = "          job: " + job + "\n"
+            for label_key, label_value in custom_labels.items():
+                labels_yaml += f"          {label_key}: {label_value}\n"
+
+            target = f"""
+  - job_name: {job}
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+{labels_yaml}          __path__: {path}
+"""
+            custom_targets.append(target)
+
+        # Replace the default scrape_config with our custom ones
+        if custom_targets:
+            base_config = """server:
+  http_listen_port: {promtail_port}
+  http_listen_address: {host}
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://{host}:{loki_port}/loki/api/v1/push
+
+scrape_configs:""".format(
+                host=host,
+                loki_port=loki_port,
+                promtail_port=promtail_port
+            )
+
+            promtail_config = base_config + "".join(custom_targets)
+            print("Using custom log paths from configuration.")
 
     # Write config files
     write_config(os.path.join(base_dir, "loki-config.yaml"), loki_config)
@@ -625,7 +739,9 @@ def start(ctx, background, force, timeout):
 
     print(f"\nAll services started:")
     print(f"- Grafana: http://{host}:{grafana_port}")
-    print(f"- Loki: http://{host}:{loki_port}")
+    print(f"  (Default credentials: admin/admin)")
+    print(f"- Loki API: http://{host}:{loki_port}/loki/api/v1/labels")
+    print(f"  (Loki has no UI - access through Grafana or use API endpoints)")
     print(f"- Promtail: http://{host}:{promtail_port}")
     print(f"Log files are located in: {logs_dir}")
 
@@ -770,7 +886,9 @@ def status(ctx):
             print(f"- {name.capitalize()}: PID {pid}")
         print(f"\nAccess URLs:")
         print(f"- Grafana: http://{host}:{grafana_port}")
-        print(f"- Loki: http://{host}:{loki_port}")
+        print(f"  (Default credentials: admin/admin)")
+        print(f"- Loki API: http://{host}:{loki_port}/loki/api/v1/labels")
+        print(f"  (Loki has no UI - access through Grafana or use API endpoints)")
         print(f"- Promtail: http://{host}:{promtail_port}")
     else:
         print("Services are not running or have crashed.")
@@ -791,3 +909,104 @@ def clean(ctx):
     if os.path.exists(base_dir):
         shutil.rmtree(base_dir)
         print("Cleaned up all files.")
+
+def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
+    """Update promtail config to add a new log path."""
+    # Default values
+    job_name = job_name or f"job_{hash(log_path) % 10000}"
+    labels = labels or {}
+
+    config_path = os.path.join(base_dir, "promtail-config.yaml")
+
+    if not os.path.exists(config_path):
+        print(f"Error: Promtail config not found at {config_path}. Run 'lokikit setup' first.")
+        return False
+
+    try:
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Error loading Promtail config: {e}")
+        return False
+
+    # Ensure structure exists
+    if not config:
+        print("Error: Invalid Promtail config.")
+        return False
+
+    if "scrape_configs" not in config:
+        config["scrape_configs"] = []
+
+    # Convert log_path to absolute path if it's relative
+    abs_log_path = os.path.expanduser(log_path)
+
+    # Check if path already exists in config
+    path_exists = False
+    for job in config["scrape_configs"]:
+        for static_config in job.get("static_configs", []):
+            for target_labels in static_config.get("labels", {}).items():
+                if "__path__" in target_labels and target_labels["__path__"] == abs_log_path:
+                    path_exists = True
+                    print(f"Path {abs_log_path} is already being watched.")
+                    break
+
+    if not path_exists:
+        # Create new job config
+        new_job = {
+            "job_name": job_name,
+            "static_configs": [
+                {
+                    "targets": ["localhost"],
+                    "labels": {
+                        "job": job_name,
+                        "__path__": abs_log_path
+                    }
+                }
+            ]
+        }
+
+        # Add custom labels
+        for key, value in labels.items():
+            new_job["static_configs"][0]["labels"][key] = value
+
+        config["scrape_configs"].append(new_job)
+
+        # Write updated config
+        with open(config_path, "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+
+        print(f"Added {abs_log_path} to Promtail configuration with job name '{job_name}'.")
+        return True
+
+    return False
+
+@cli.command()
+@click.argument("path")
+@click.option("--job", help="Job name for the log path.")
+@click.option("--label", multiple=True, help="Labels in format key=value. Can be specified multiple times.")
+@click.pass_context
+def watch(ctx, path, job, label):
+    """Add a log path to Promtail configuration.
+
+    PATH is the file or directory to watch for logs (glob patterns supported).
+    """
+    base_dir = ctx.obj["BASE_DIR"]
+
+    # Parse labels
+    labels = {}
+    for lbl in label:
+        try:
+            key, value = lbl.split("=", 1)
+            labels[key.strip()] = value.strip()
+        except ValueError:
+            print(f"Warning: Ignoring invalid label format: {lbl}. Use key=value format.")
+
+    # Update promtail config
+    if update_promtail_config(base_dir, path, job, labels):
+        # Check if services are running
+        pids = read_pid_file(base_dir)
+        if pids and check_services_running(pids):
+            print("\nServices are currently running.")
+            print("To apply changes, restart services with: lokikit stop && lokikit start")
+    else:
+        print("No changes made to Promtail configuration.")
