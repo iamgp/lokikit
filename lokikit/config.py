@@ -41,6 +41,7 @@ schema_config:
         prefix: index_
         period: 24h
 limits_config:
+  max_query_length: 8760h  # 365 days
   allow_structured_metadata: false
   reject_old_samples: true
   reject_old_samples_max_age: 168h
