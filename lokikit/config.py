@@ -110,6 +110,19 @@ def ensure_dir(path):
 
 def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
     """Update promtail config to add a new log path."""
+    # Import logger here to avoid circular imports
+    try:
+        from lokikit.logging import get_logger
+        logger = get_logger()
+    except ImportError:
+        # Fallback if logging module not available
+        class FallbackLogger:
+            def info(self, msg, *args): print(msg % args if args else msg)
+            def error(self, msg, *args): print(f"Error: {msg % args if args else msg}")
+            def warning(self, msg, *args): print(f"Warning: {msg % args if args else msg}")
+            def debug(self, msg, *args): pass
+        logger = FallbackLogger()
+
     # Default values
     job_name = job_name or f"job_{hash(log_path) % 10000}"
     labels = labels or {}
@@ -117,19 +130,19 @@ def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
     config_path = os.path.join(base_dir, "promtail-config.yaml")
 
     if not os.path.exists(config_path):
-        print(f"Error: Promtail config not found at {config_path}. Run 'lokikit setup' first.")
+        logger.error(f"Promtail config not found at {config_path}. Run 'lokikit setup' first.")
         return False
 
     try:
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
     except Exception as e:
-        print(f"Error loading Promtail config: {e}")
+        logger.error(f"Error loading Promtail config: {e}")
         return False
 
     # Ensure structure exists
     if not config:
-        print("Error: Invalid Promtail config.")
+        logger.error("Invalid Promtail config.")
         return False
 
     if "scrape_configs" not in config:
@@ -142,11 +155,11 @@ def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
     path_exists = False
     for job in config["scrape_configs"]:
         for static_config in job.get("static_configs", []):
-            for target_labels in static_config.get("labels", {}).items():
-                if "__path__" in target_labels and target_labels["__path__"] == abs_log_path:
-                    path_exists = True
-                    print(f"Path {abs_log_path} is already being watched.")
-                    break
+            labels_dict = static_config.get("labels", {})
+            if "__path__" in labels_dict and labels_dict["__path__"] == abs_log_path:
+                path_exists = True
+                logger.info(f"Path {abs_log_path} is already being watched.")
+                break
 
     if not path_exists:
         # Create new job config
@@ -173,7 +186,7 @@ def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
         with open(config_path, "w") as f:
             yaml.dump(config, f, default_flow_style=False)
 
-        print(f"Added {abs_log_path} to Promtail configuration with job name '{job_name}'.")
+        logger.info(f"Added {abs_log_path} to Promtail configuration with job name '{job_name}'.")
         return True
 
     return False

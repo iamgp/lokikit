@@ -5,6 +5,9 @@ import shutil
 import sys
 import click
 import yaml
+import signal
+import subprocess
+import time
 
 from lokikit.config import (
     ensure_dir,
@@ -27,6 +30,7 @@ from lokikit.process import (
     wait_for_services,
     stop_services,
 )
+from lokikit.logging import get_logger
 
 def setup_command(ctx):
     """Download binaries and write config files."""
@@ -37,20 +41,24 @@ def setup_command(ctx):
     promtail_port = ctx.obj["PROMTAIL_PORT"]
     config = ctx.obj["CONFIG"]
 
+    logger = get_logger()
+
     ensure_dir(base_dir)
     binaries = get_binaries(base_dir)
-    print(f"Using Loki/Promtail version: {binaries['loki']['version']}")
-    print(f"Using Grafana version: {binaries['grafana']['version']}")
+    logger.info(f"Using Loki/Promtail version: {binaries['loki']['version']}")
+    logger.info(f"Using Grafana version: {binaries['grafana']['version']}")
 
     # Loki and Promtail
     for name in ["loki", "promtail"]:
         bin_path = os.path.join(base_dir, binaries[name]["binary"])
         if os.path.exists(bin_path):
-            print(f"{name.capitalize()} binary already exists at {bin_path}, skipping download.")
+            logger.info(f"{name.capitalize()} binary already exists at {bin_path}, skipping download.")
         else:
+            logger.info(f"Downloading {name}...")
             download_and_extract(binaries[name]["url"], base_dir, binaries[name]["filename"])
             if binaries["os_name"] != "windows":
                 os.chmod(bin_path, 0o755)
+            logger.info(f"{name.capitalize()} binary downloaded and extracted.")
 
     # Grafana
     grafana_bin = find_grafana_binary(
@@ -60,8 +68,9 @@ def setup_command(ctx):
     )
 
     if grafana_bin and os.path.exists(grafana_bin):
-        print(f"Grafana binary already exists at {grafana_bin}, skipping download.")
+        logger.info(f"Grafana binary already exists at {grafana_bin}, skipping download.")
     else:
+        logger.info(f"Downloading Grafana...")
         download_and_extract(binaries["grafana"]["url"], base_dir, binaries["grafana"]["filename"])
         grafana_bin = find_grafana_binary(
             base_dir,
@@ -72,8 +81,9 @@ def setup_command(ctx):
         if grafana_bin:
             if binaries["os_name"] != "windows":
                 os.chmod(grafana_bin, 0o755)
+            logger.info("Grafana downloaded and extracted.")
         else:
-            print("Warning: Could not find grafana-server binary after extraction.")
+            logger.warning("Could not find grafana-server binary after extraction.")
 
     # Generate configs with the specified host and ports
     loki_config = LOKI_CONFIG_TEMPLATE.format(
@@ -88,31 +98,51 @@ def setup_command(ctx):
         promtail_port=promtail_port
     )
 
+    # Default list of log paths - add lokikit logs directory
+    default_log_paths = [
+        {
+            "path": os.path.join(base_dir, "logs", "*.log"),
+            "job": "service_logs",
+            "labels": {"source": "lokikit", "type": "service_log"}
+        },
+        {
+            "path": os.path.join(base_dir, "logs", "lokikit_*.log"),
+            "job": "lokikit_app",
+            "labels": {"source": "lokikit", "type": "application_log"}
+        }
+    ]
+
     # Apply custom log paths if specified in config
     if "promtail" in config and "log_paths" in config["promtail"]:
-        # Create a modified promtail config with custom log paths
-        custom_targets = []
-        for i, log_path in enumerate(config["promtail"]["log_paths"]):
-            # Extract job name if provided, otherwise use an auto-generated name
-            if isinstance(log_path, dict) and "path" in log_path and "job" in log_path:
-                path = log_path["path"]
-                job = log_path["job"]
-                custom_labels = log_path.get("labels", {})
-            else:
-                # If it's just a string path
-                path = log_path if isinstance(log_path, str) else log_path.get("path", "")
-                job = f"logfile_{i}"
-                custom_labels = {}
+        # Use both default and user-specified log paths
+        log_paths = default_log_paths + config["promtail"]["log_paths"]
+    else:
+        # Use only default log paths
+        log_paths = default_log_paths
 
-            if not path:
-                continue
+    # Create a modified promtail config with custom log paths
+    custom_targets = []
+    for i, log_path in enumerate(log_paths):
+        # Extract job name if provided, otherwise use an auto-generated name
+        if isinstance(log_path, dict) and "path" in log_path and "job" in log_path:
+            path = log_path["path"]
+            job = log_path["job"]
+            custom_labels = log_path.get("labels", {})
+        else:
+            # If it's just a string path
+            path = log_path if isinstance(log_path, str) else log_path.get("path", "")
+            job = f"logfile_{i}"
+            custom_labels = {}
 
-            # Format labels as YAML
-            labels_yaml = "          job: " + job + "\n"
-            for label_key, label_value in custom_labels.items():
-                labels_yaml += f"          {label_key}: {label_value}\n"
+        if not path:
+            continue
 
-            target = f"""
+        # Format labels as YAML
+        labels_yaml = "          job: " + job + "\n"
+        for label_key, label_value in custom_labels.items():
+            labels_yaml += f"          {label_key}: {label_value}\n"
+
+        target = f"""
   - job_name: {job}
     static_configs:
       - targets:
@@ -120,11 +150,12 @@ def setup_command(ctx):
         labels:
 {labels_yaml}          __path__: {path}
 """
-            custom_targets.append(target)
+        custom_targets.append(target)
+        logger.debug(f"Added log path: {path} with job: {job}")
 
-        # Replace the default scrape_config with our custom ones
-        if custom_targets:
-            base_config = """server:
+    # Replace the default scrape_config with our custom ones
+    if custom_targets:
+        base_config = """server:
   http_listen_port: {promtail_port}
   http_listen_address: {host}
   grpc_listen_port: 0
@@ -136,16 +167,18 @@ clients:
   - url: http://{host}:{loki_port}/loki/api/v1/push
 
 scrape_configs:""".format(
-                host=host,
-                loki_port=loki_port,
-                promtail_port=promtail_port
-            )
+            host=host,
+            loki_port=loki_port,
+            promtail_port=promtail_port
+        )
 
-            promtail_config = base_config + "".join(custom_targets)
-            print("Using custom log paths from configuration.")
+        promtail_config = base_config + "".join(custom_targets)
+        logger.info("Using custom log paths configuration.")
 
     # Write config files
+    logger.debug("Writing Loki configuration...")
     write_config(os.path.join(base_dir, "loki-config.yaml"), loki_config)
+    logger.debug("Writing Promtail configuration...")
     write_config(os.path.join(base_dir, "promtail-config.yaml"), promtail_config)
 
     # Create Grafana provisioning directories for datasource
@@ -166,7 +199,8 @@ scrape_configs:""".format(
                     "url": f"http://{host}:{loki_port}",
                     "isDefault": True,
                     "jsonData": {
-                        "maxLines": 1000
+                        "maxLines": 1000,
+                        "timeout": 60
                     }
                 }
             ]
@@ -177,9 +211,9 @@ scrape_configs:""".format(
         with open(loki_ds_config_path, "w") as f:
             yaml.dump(loki_datasource_config, f, default_flow_style=False)
 
-        print(f"Created Loki datasource configuration for Grafana at {loki_ds_config_path}")
+        logger.info(f"Created Loki datasource configuration for Grafana at {loki_ds_config_path}")
 
-    print("Setup complete.")
+    logger.info("Setup complete.")
 
 def start_command(ctx, background, force, timeout):
     """Start Loki, Promtail, and Grafana."""
@@ -189,28 +223,32 @@ def start_command(ctx, background, force, timeout):
     loki_port = ctx.obj["LOKI_PORT"]
     promtail_port = ctx.obj["PROMTAIL_PORT"]
 
+    logger = get_logger()
+    logger.debug("Starting services with: host=%s, loki=%s, promtail=%s, grafana=%s",
+                 host, loki_port, promtail_port, grafana_port)
+
     # Check if services are already running
     existing_pids = read_pid_file(base_dir)
     if existing_pids and check_services_running(existing_pids) and not force:
-        print(f"Services are already running with PIDs: {existing_pids}")
-        print(f"- Grafana: http://{host}:{grafana_port}")
-        print(f"  (Default credentials: admin/admin)")
-        print(f"- Loki API: http://{host}:{loki_port}/loki/api/v1/labels")
-        print(f"  (Loki has no UI - access through Grafana or use API endpoints)")
-        print(f"- Promtail: http://{host}:{promtail_port}")
-        print("Use --force to start anyway.")
+        logger.info(f"Services are already running with PIDs: {existing_pids}")
+        logger.info(f"- Grafana: http://{host}:{grafana_port}")
+        logger.info(f"  (Default credentials: admin/admin)")
+        logger.info(f"- Loki API: http://{host}:{loki_port}/loki/api/v1/labels")
+        logger.info(f"  (Loki has no UI - access through Grafana or use API endpoints)")
+        logger.info(f"- Promtail: http://{host}:{promtail_port}")
+        logger.info("Use --force to start anyway.")
         if not background:
-            print("Press Ctrl+C to exit or run 'lokikit stop' from another terminal to stop the services.")
+            logger.info("Press Ctrl+C to exit or run 'lokikit stop' from another terminal to stop the services.")
             try:
                 import signal
                 signal.pause()
             except KeyboardInterrupt:
-                print("Exiting without stopping services. Run 'lokikit stop' to stop them.")
+                logger.info("Exiting without stopping services. Run 'lokikit stop' to stop them.")
         return
 
     # Stop existing services if forcing
     if existing_pids and force:
-        print("Stopping existing services first...")
+        logger.info("Stopping existing services first...")
         stop_services(existing_pids)
         # Delete pid file
         pid_file = os.path.join(base_dir, "lokikit.pid")
@@ -228,7 +266,7 @@ def start_command(ctx, background, force, timeout):
         if not loki_bin: missing.append("loki")
         if not promtail_bin: missing.append("promtail")
         if not grafana_bin: missing.append("grafana")
-        print(f"Error: Missing binaries {', '.join(missing)}. Please run 'lokikit setup' first.")
+        logger.error(f"Missing binaries {', '.join(missing)}. Please run 'lokikit setup' first.")
         sys.exit(1)
 
     # Prepare log files and configs
@@ -242,10 +280,12 @@ def start_command(ctx, background, force, timeout):
 
     # Start Loki
     loki_log = os.path.join(logs_dir, "loki.log")
+    logger.debug(f"Starting Loki with config: {loki_cfg}")
     procs["loki"] = start_process([loki_bin, "-config.file", loki_cfg], loki_log)
 
     # Start Promtail
     promtail_log = os.path.join(logs_dir, "promtail.log")
+    logger.debug(f"Starting Promtail with config: {promtail_cfg}")
     procs["promtail"] = start_process([promtail_bin, "-config.file", promtail_cfg], promtail_log)
 
     # Start Grafana
@@ -268,7 +308,8 @@ def start_command(ctx, background, force, timeout):
                 "url": f"http://{host}:{loki_port}",
                 "isDefault": True,
                 "jsonData": {
-                    "maxLines": 1000
+                    "maxLines": 1000,
+                    "timeout": 60
                 }
             }
         ]
@@ -279,7 +320,7 @@ def start_command(ctx, background, force, timeout):
     with open(loki_ds_config_path, "w") as f:
         yaml.dump(loki_datasource_config, f, default_flow_style=False)
 
-    print(f"Created Loki datasource configuration for Grafana at {loki_ds_config_path}")
+    logger.info(f"Created Loki datasource configuration for Grafana at {loki_ds_config_path}")
 
     # Use the classic grafana-server format
     grafana_cmd = [
@@ -289,6 +330,7 @@ def start_command(ctx, background, force, timeout):
         "--configOverrides", f"server.http_addr={host};server.http_port={grafana_port}"
     ]
 
+    logger.debug(f"Starting Grafana with command: {' '.join(grafana_cmd)}")
     procs["grafana"] = start_process(grafana_cmd, grafana_log)
 
     # Wait for services to start
@@ -302,22 +344,23 @@ def start_command(ctx, background, force, timeout):
     # Store process IDs for background mode and potential future operations
     pids = {name: proc.pid for name, proc in procs.items()}
     pid_file = write_pid_file(pids, base_dir)
+    logger.debug(f"Wrote PID file with PIDs: {pids}")
 
-    print(f"\nAll services started:")
-    print(f"- Grafana: http://{host}:{grafana_port}")
-    print(f"  (Default credentials: admin/admin)")
-    print(f"- Loki API: http://{host}:{loki_port}/loki/api/v1/labels")
-    print(f"  (Loki has no UI - access through Grafana or use API endpoints)")
-    print(f"- Promtail: http://{host}:{promtail_port}")
-    print(f"Log files are located in: {logs_dir}")
+    logger.info(f"\nAll services started:")
+    logger.info(f"- Grafana: http://{host}:{grafana_port}")
+    logger.info(f"  (Default credentials: admin/admin)")
+    logger.info(f"- Loki API: http://{host}:{loki_port}/loki/api/v1/labels")
+    logger.info(f"  (Loki has no UI - access through Grafana or use API endpoints)")
+    logger.info(f"- Promtail: http://{host}:{promtail_port}")
+    logger.info(f"Log files are located in: {logs_dir}")
 
     if background:
-        print(f"Running in background mode. PIDs stored in {pid_file}")
-        print(f"To check status: lokikit status")
-        print(f"To stop the services: lokikit stop")
+        logger.info(f"Running in background mode. PIDs stored in {pid_file}")
+        logger.info(f"To check status: lokikit status")
+        logger.info(f"To stop the services: lokikit stop")
         return
     else:
-        print("\nPress Ctrl+C to stop the services.")
+        logger.info("\nPress Ctrl+C to stop the services.")
         try:
             # In foreground mode, wait for all processes
             # This keeps the process running in the foreground
@@ -326,52 +369,104 @@ def start_command(ctx, background, force, timeout):
                 time.sleep(1)
 
             # If we get here, at least one process has terminated
-            print("One or more services have terminated unexpectedly.")
+            logger.warning("One or more services have terminated unexpectedly.")
             for name, proc in procs.items():
                 if proc.poll() is not None:
-                    print(f"- {name} exited with code {proc.poll()}")
-            print(f"Check the log files in {logs_dir} for details.")
+                    logger.warning(f"- {name} exited with code {proc.poll()}")
+            logger.info(f"Check the log files in {logs_dir} for details.")
 
         except KeyboardInterrupt:
-            print("\nStopping services...")
+            logger.info("\nStopping services...")
             for name, proc in procs.items():
                 try:
                     proc.terminate()
-                    print(f"Terminated {name}")
+                    logger.info(f"Terminated {name}")
                 except:
                     pass
 
 def stop_command(ctx, force):
     """Stop running services."""
     base_dir = ctx.obj["BASE_DIR"]
+    logger = get_logger()
+
+    logger.debug("Stopping lokikit services...")
+
+    # First try to stop using PID file
     pids = read_pid_file(base_dir)
+    services_stopped = False
 
-    if not pids:
-        print("No running services found.")
-        return
-
-    if force:
-        import signal
-        print("Force stopping services with SIGKILL...")
-        for name, pid in pids.items():
-            try:
-                print(f"Killing {name} (PID: {pid})...")
-                os.kill(pid, signal.SIGKILL)
-            except OSError as e:
-                if e.errno == 3:  # No such process
-                    print(f"  Service {name} (PID: {pid}) was not running")
-                else:
-                    print(f"  Error killing {name}: {e}")
+    if pids:
+        if force:
+            logger.info("Force stopping services with SIGKILL...")
+            for name, pid in pids.items():
+                try:
+                    logger.info(f"Killing {name} (PID: {pid})...")
+                    os.kill(pid, signal.SIGKILL)
+                    services_stopped = True
+                except OSError as e:
+                    if e.errno == 3:  # No such process
+                        logger.info(f"Service {name} (PID: {pid}) was not running")
+                    else:
+                        logger.error(f"Error killing {name}: {e}")
+        else:
+            services_stopped = stop_services(pids)
     else:
-        stop_services(pids)
+        logger.info("No PID file found, searching for running processes by pattern...")
 
-    # Remove PID file
+    # Even if PID file doesn't exist, try to find and kill processes by pattern
+    if not pids or not services_stopped:
+        # Try to identify processes by pattern
+        found_processes = False
+        for name, pattern in [
+            ("loki", "loki-.*"),
+            ("promtail", "promtail-.*"),
+            ("grafana", "grafana-server")
+        ]:
+            try:
+                result = subprocess.run(
+                    ["pgrep", "-f", pattern],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    found_processes = True
+                    pids_found = [int(pid) for pid in result.stdout.strip().split()]
+                    logger.info(f"Found {name} processes: {pids_found}")
+
+                    for pid in pids_found:
+                        try:
+                            if force:
+                                logger.info(f"Force killing {name} (PID: {pid})...")
+                                os.kill(pid, signal.SIGKILL)
+                            else:
+                                logger.info(f"Stopping {name} (PID: {pid})...")
+                                os.kill(pid, signal.SIGTERM)
+                                # Wait for termination
+                                for _ in range(10):
+                                    try:
+                                        os.kill(pid, 0)
+                                        time.sleep(0.1)
+                                    except OSError:
+                                        break
+                                else:
+                                    # Still running, try SIGKILL
+                                    logger.warning(f"Process did not terminate, using SIGKILL...")
+                                    os.kill(pid, signal.SIGKILL)
+                        except OSError as e:
+                            logger.error(f"Error stopping {name} (PID: {pid}): {e}")
+            except subprocess.SubprocessError as e:
+                logger.error(f"Error searching for {name} processes: {e}")
+
+        if not found_processes:
+            logger.info("No running lokikit processes found.")
+
+    # Remove PID file if it exists
     pid_file = os.path.join(base_dir, "lokikit.pid")
     if os.path.exists(pid_file):
         os.remove(pid_file)
-        print("Removed PID file.")
+        logger.info("Removed PID file.")
 
-    print("Operation completed.")
+    logger.info("Operation completed.")
 
 def status_command(ctx):
     """Check if services are running."""
@@ -380,46 +475,86 @@ def status_command(ctx):
     grafana_port = ctx.obj["GRAFANA_PORT"]
     loki_port = ctx.obj["LOKI_PORT"]
     promtail_port = ctx.obj["PROMTAIL_PORT"]
+    import subprocess
 
+    logger = get_logger()
+    logger.debug("Checking status of lokikit services...")
+
+    # First try to get status from PID file
     pids = read_pid_file(base_dir)
+    running_from_pid = False
 
-    if not pids:
-        print("No services appear to be running.")
+    if pids:
+        running_from_pid = check_services_running(pids)
+
+    # Even if PID file doesn't exist or PIDs are no longer valid,
+    # check for running processes by pattern
+    running_services = {}
+
+    for name, pattern in [
+        ("loki", "loki-.*"),
+        ("promtail", "promtail-.*"),
+        ("grafana", "grafana-server")
+    ]:
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", pattern],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                # Store the PIDs found
+                running_services[name] = [int(pid) for pid in result.stdout.strip().split()]
+        except subprocess.SubprocessError:
+            pass
+
+    if running_from_pid:
+        logger.info("Services are running according to PID file:")
+        for name, pid in pids.items():
+            logger.info(f"- {name.capitalize()}: PID {pid}")
+    elif running_services:
+        logger.info("Services are running but the PID file may be out of sync:")
+        for name, pids_list in running_services.items():
+            logger.info(f"- {name.capitalize()}: PIDs {', '.join(map(str, pids_list))}")
+        logger.info("\nConsider running 'lokikit stop' and then 'lokikit start' to synchronize the PID file.")
+    else:
+        logger.info("No services appear to be running.")
         return
 
-    running = check_services_running(pids)
-
-    if running:
-        print("Services are running:")
-        for name, pid in pids.items():
-            print(f"- {name.capitalize()}: PID {pid}")
-        print(f"\nAccess URLs:")
-        print(f"- Grafana: http://{host}:{grafana_port}")
-        print(f"  (Default credentials: admin/admin)")
-        print(f"- Loki API: http://{host}:{loki_port}/loki/api/v1/labels")
-        print(f"  (Loki has no UI - access through Grafana or use API endpoints)")
-        print(f"- Promtail: http://{host}:{promtail_port}")
-    else:
-        print("Services are not running or have crashed.")
-        print("Check the log files or run 'lokikit start' to restart them.")
+    # If any services are running, show the access URLs
+    if running_from_pid or running_services:
+        logger.info(f"\nAccess URLs:")
+        logger.info(f"- Grafana: http://{host}:{grafana_port}")
+        logger.info(f"  (Default credentials: admin/admin)")
+        logger.info(f"- Loki API: http://{host}:{loki_port}/loki/api/v1/labels")
+        logger.info(f"  (Loki has no UI - access through Grafana or use API endpoints)")
+        logger.info(f"- Promtail: http://{host}:{promtail_port}")
 
 def clean_command(ctx):
     """Remove all downloaded files and configs."""
     base_dir = ctx.obj["BASE_DIR"]
+    logger = get_logger()
+
+    logger.debug(f"Cleaning up lokikit files from {base_dir}...")
 
     # Check if services are running and stop them first
     pids = read_pid_file(base_dir)
     if pids and check_services_running(pids):
-        print("Stopping running services first...")
+        logger.info("Stopping running services first...")
         stop_services(pids)
 
     if os.path.exists(base_dir):
         shutil.rmtree(base_dir)
-        print("Cleaned up all files.")
+        logger.info("Cleaned up all files.")
+    else:
+        logger.info(f"Nothing to clean: directory {base_dir} does not exist.")
 
 def watch_command(ctx, path, job, label):
     """Add a log path to Promtail configuration."""
     base_dir = ctx.obj["BASE_DIR"]
+    logger = get_logger()
+
+    logger.debug(f"Adding log path '{path}' with job '{job}' to Promtail config...")
 
     # Parse labels
     labels = {}
@@ -428,14 +563,14 @@ def watch_command(ctx, path, job, label):
             key, value = lbl.split("=", 1)
             labels[key.strip()] = value.strip()
         except ValueError:
-            print(f"Warning: Ignoring invalid label format: {lbl}. Use key=value format.")
+            logger.warning(f"Ignoring invalid label format: {lbl}. Use key=value format.")
 
     # Update promtail config
     if update_promtail_config(base_dir, path, job, labels):
         # Check if services are running
         pids = read_pid_file(base_dir)
         if pids and check_services_running(pids):
-            print("\nServices are currently running.")
-            print("To apply changes, restart services with: lokikit stop && lokikit start")
+            logger.info("\nServices are currently running.")
+            logger.info("To apply changes, restart services with: lokikit stop && lokikit start")
     else:
-        print("No changes made to Promtail configuration.")
+        logger.info("No changes made to Promtail configuration.")

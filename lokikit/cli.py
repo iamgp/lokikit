@@ -19,6 +19,7 @@ from lokikit.commands import (
     clean_command,
     watch_command,
 )
+from lokikit.logging import setup_logging
 
 @click.group()
 @click.option(
@@ -56,8 +57,14 @@ from lokikit.commands import (
     default=None,
     help="Path to YAML configuration file to override default options.",
 )
+@click.option(
+    "--verbose", "-v",
+    is_flag=True,
+    default=False,
+    help="Enable verbose logging for debugging.",
+)
 @click.pass_context
-def cli(ctx, base_dir, host, port, loki_port, promtail_port, config):
+def cli(ctx, base_dir, host, port, loki_port, promtail_port, config, verbose):
     """lokikit: Minimal Loki+Promtail+Grafana stack launcher."""
     ctx.ensure_object(dict)
 
@@ -83,6 +90,11 @@ def cli(ctx, base_dir, host, port, loki_port, promtail_port, config):
     ctx.obj["GRAFANA_PORT"] = merged_config.get("grafana_port", DEFAULT_GRAFANA_PORT)
     ctx.obj["LOKI_PORT"] = merged_config.get("loki_port", DEFAULT_LOKI_PORT)
     ctx.obj["PROMTAIL_PORT"] = merged_config.get("promtail_port", DEFAULT_PROMTAIL_PORT)
+    ctx.obj["VERBOSE"] = verbose
+
+    # Setup logging system
+    logger = setup_logging(ctx.obj["BASE_DIR"], verbose)
+    logger.debug("lokikit starting with config: %s", merged_config)
 
     # Store all config in context for commands to access
     ctx.obj["CONFIG"] = merged_config
