@@ -210,14 +210,22 @@ def setup(ctx):
     print(f"Using Loki/Promtail version: {binaries['loki']['version']}")
     print(f"Using Grafana version: {binaries['grafana']['version']}")
     for name in ["loki", "promtail"]:
-        download_and_extract(binaries[name]["url"], base_dir, binaries[name]["filename"])
         bin_path = get_binary_path(name, binaries, base_dir)
+        if os.path.exists(bin_path):
+            print(f"{name.capitalize()} binary already exists at {bin_path}, skipping download.")
+        else:
+            download_and_extract(binaries[name]["url"], base_dir, binaries[name]["filename"])
+            if binaries["os_name"] != "windows":
+                os.chmod(bin_path, 0o755)
+    # Grafana
+    bin_path = get_binary_path("grafana", binaries, base_dir)
+    if os.path.exists(bin_path):
+        print(f"Grafana binary already exists at {bin_path}, skipping download.")
+    else:
+        download_and_extract(binaries["grafana"]["url"], base_dir, binaries["grafana"]["filename"])
         if binaries["os_name"] != "windows":
             os.chmod(bin_path, 0o755)
-    download_and_extract(binaries["grafana"]["url"], base_dir, binaries["grafana"]["filename"])
-    bin_path = get_binary_path("grafana", binaries, base_dir)
-    if binaries["os_name"] != "windows":
-        os.chmod(bin_path, 0o755)
+    # Always (re)write config files
     write_config(os.path.join(base_dir, "loki-config.yaml"), LOKI_CONFIG)
     write_config(os.path.join(base_dir, "promtail-config.yaml"), PROMTAIL_CONFIG)
     print("Setup complete.")
