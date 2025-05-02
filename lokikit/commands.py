@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import click
+import yaml
 
 from lokikit.config import (
     ensure_dir,
@@ -146,6 +147,38 @@ scrape_configs:""".format(
     # Write config files
     write_config(os.path.join(base_dir, "loki-config.yaml"), loki_config)
     write_config(os.path.join(base_dir, "promtail-config.yaml"), promtail_config)
+
+    # Create Grafana provisioning directories for datasource
+    if grafana_bin:
+        grafana_home = os.path.dirname(os.path.dirname(grafana_bin))
+        grafana_provisioning_dir = os.path.join(grafana_home, "conf", "provisioning")
+        grafana_datasources_dir = os.path.join(grafana_provisioning_dir, "datasources")
+        ensure_dir(grafana_datasources_dir)
+
+        # Create Loki datasource provisioning config
+        loki_datasource_config = {
+            "apiVersion": 1,
+            "datasources": [
+                {
+                    "name": "Loki",
+                    "type": "loki",
+                    "access": "proxy",
+                    "url": f"http://{host}:{loki_port}",
+                    "isDefault": True,
+                    "jsonData": {
+                        "maxLines": 1000
+                    }
+                }
+            ]
+        }
+
+        # Write datasource config
+        loki_ds_config_path = os.path.join(grafana_datasources_dir, "loki.yaml")
+        with open(loki_ds_config_path, "w") as f:
+            yaml.dump(loki_datasource_config, f, default_flow_style=False)
+
+        print(f"Created Loki datasource configuration for Grafana at {loki_ds_config_path}")
+
     print("Setup complete.")
 
 def start_command(ctx, background, force, timeout):
@@ -218,6 +251,35 @@ def start_command(ctx, background, force, timeout):
     # Start Grafana
     grafana_log = os.path.join(logs_dir, "grafana.log")
     grafana_home = os.path.dirname(os.path.dirname(grafana_bin))
+
+    # Create Grafana provisioning directories and datasource config
+    grafana_provisioning_dir = os.path.join(grafana_home, "conf", "provisioning")
+    grafana_datasources_dir = os.path.join(grafana_provisioning_dir, "datasources")
+    ensure_dir(grafana_datasources_dir)
+
+    # Create Loki datasource provisioning config
+    loki_datasource_config = {
+        "apiVersion": 1,
+        "datasources": [
+            {
+                "name": "Loki",
+                "type": "loki",
+                "access": "proxy",
+                "url": f"http://{host}:{loki_port}",
+                "isDefault": True,
+                "jsonData": {
+                    "maxLines": 1000
+                }
+            }
+        ]
+    }
+
+    # Write datasource config
+    loki_ds_config_path = os.path.join(grafana_datasources_dir, "loki.yaml")
+    with open(loki_ds_config_path, "w") as f:
+        yaml.dump(loki_datasource_config, f, default_flow_style=False)
+
+    print(f"Created Loki datasource configuration for Grafana at {loki_ds_config_path}")
 
     # Use the classic grafana-server format
     grafana_cmd = [
