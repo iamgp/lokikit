@@ -188,30 +188,34 @@ scrape_configs:""".format(
         grafana_datasources_dir = os.path.join(grafana_provisioning_dir, "datasources")
         ensure_dir(grafana_datasources_dir)
 
-        # Create Loki datasource provisioning config
-        loki_datasource_config = {
-            "apiVersion": 1,
-            "datasources": [
-                {
-                    "name": "Loki",
-                    "type": "loki",
-                    "access": "proxy",
-                    "url": f"http://{host}:{loki_port}",
-                    "isDefault": True,
-                    "jsonData": {
-                        "maxLines": 1000,
-                        "timeout": 60
+        # Check if Loki datasource config already exists
+        loki_ds_config_path = os.path.join(grafana_datasources_dir, "lokikit.yaml")
+        if not os.path.exists(loki_ds_config_path):
+            # Create Loki datasource provisioning config
+            loki_datasource_config = {
+                "apiVersion": 1,
+                "datasources": [
+                    {
+                        "name": "lokikit",
+                        "type": "loki",
+                        "access": "proxy",
+                        "url": f"http://{host}:{loki_port}",
+                        "isDefault": True,
+                        "jsonData": {
+                            "maxLines": 1000,
+                            "timeout": 60
+                        }
                     }
-                }
-            ]
-        }
+                ]
+            }
 
-        # Write datasource config
-        loki_ds_config_path = os.path.join(grafana_datasources_dir, "loki.yaml")
-        with open(loki_ds_config_path, "w") as f:
-            yaml.dump(loki_datasource_config, f, default_flow_style=False)
+            # Write datasource config
+            with open(loki_ds_config_path, "w") as f:
+                yaml.dump(loki_datasource_config, f, default_flow_style=False)
 
-        logger.info(f"Created Loki datasource configuration for Grafana at {loki_ds_config_path}")
+            logger.info(f"Created Loki datasource configuration for Grafana at {loki_ds_config_path}")
+        else:
+            logger.debug(f"Loki datasource configuration already exists at {loki_ds_config_path}")
 
     logger.info("Setup complete.")
 
@@ -292,35 +296,39 @@ def start_command(ctx, background, force, timeout):
     grafana_log = os.path.join(logs_dir, "grafana.log")
     grafana_home = os.path.dirname(os.path.dirname(grafana_bin))
 
-    # Create Grafana provisioning directories and datasource config
+    # Ensure Grafana provisioning directories exist
     grafana_provisioning_dir = os.path.join(grafana_home, "conf", "provisioning")
     grafana_datasources_dir = os.path.join(grafana_provisioning_dir, "datasources")
     ensure_dir(grafana_datasources_dir)
 
-    # Create Loki datasource provisioning config
-    loki_datasource_config = {
-        "apiVersion": 1,
-        "datasources": [
-            {
-                "name": "Loki",
-                "type": "loki",
-                "access": "proxy",
-                "url": f"http://{host}:{loki_port}",
-                "isDefault": True,
-                "jsonData": {
-                    "maxLines": 1000,
-                    "timeout": 60
+    # Check if Loki datasource config already exists
+    loki_ds_config_path = os.path.join(grafana_datasources_dir, "lokikit.yaml")
+    if not os.path.exists(loki_ds_config_path):
+        # Create Loki datasource provisioning config
+        loki_datasource_config = {
+            "apiVersion": 1,
+            "datasources": [
+                {
+                    "name": "lokikit",
+                    "type": "loki",
+                    "access": "proxy",
+                    "url": f"http://{host}:{loki_port}",
+                    "isDefault": True,
+                    "jsonData": {
+                        "maxLines": 1000,
+                        "timeout": 60
+                    }
                 }
-            }
-        ]
-    }
+            ]
+        }
 
-    # Write datasource config
-    loki_ds_config_path = os.path.join(grafana_datasources_dir, "loki.yaml")
-    with open(loki_ds_config_path, "w") as f:
-        yaml.dump(loki_datasource_config, f, default_flow_style=False)
+        # Write datasource config
+        with open(loki_ds_config_path, "w") as f:
+            yaml.dump(loki_datasource_config, f, default_flow_style=False)
 
-    logger.info(f"Created Loki datasource configuration for Grafana at {loki_ds_config_path}")
+        logger.info(f"Created Loki datasource configuration for Grafana at {loki_ds_config_path}")
+    else:
+        logger.debug(f"Loki datasource configuration already exists at {loki_ds_config_path}")
 
     # Use the classic grafana-server format
     grafana_cmd = [
@@ -574,3 +582,79 @@ def watch_command(ctx, path, job, label):
             logger.info("To apply changes, restart services with: lokikit stop && lokikit start")
     else:
         logger.info("No changes made to Promtail configuration.")
+
+def force_quit_command(ctx):
+    """Forcefully terminate all lokikit processes including stale ones.
+
+    This is useful when the PID file is out of sync with actual running processes,
+    or when processes remain after abnormal termination.
+    """
+    base_dir = ctx.obj["BASE_DIR"]
+    logger = get_logger()
+
+    logger.info("Force-quitting all lokikit processes...")
+
+    # Step 1: Check PID file and kill those processes
+    pid_file = os.path.join(base_dir, "lokikit.pid")
+    if os.path.exists(pid_file):
+        pids = read_pid_file(base_dir)
+        if pids:
+            logger.info("Found PID file with the following processes:")
+            for name, pid in pids.items():
+                try:
+                    logger.info(f"Killing {name} (PID: {pid}) with SIGKILL...")
+                    os.kill(pid, signal.SIGKILL)
+                except OSError as e:
+                    if e.errno == 3:  # No such process
+                        logger.info(f"Process {name} (PID: {pid}) was not running")
+                    else:
+                        logger.error(f"Error killing {name}: {e}")
+
+        # Remove the PID file
+        try:
+            os.remove(pid_file)
+            logger.info("Removed PID file")
+        except OSError as e:
+            logger.error(f"Error removing PID file: {e}")
+    else:
+        logger.info("No PID file found")
+
+    # Step 2: Find all related processes by pattern and kill them
+    service_patterns = [
+        ("loki", "loki-.*"),
+        ("promtail", "promtail-.*"),
+        ("grafana", "grafana-server.*")
+    ]
+
+    for name, pattern in service_patterns:
+        killed_pids = []
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", pattern],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                pids_found = [int(pid) for pid in result.stdout.strip().split()]
+                if pids_found:
+                    logger.info(f"Found {name} processes: {pids_found}")
+
+                    for pid in pids_found:
+                        try:
+                            logger.info(f"Force killing {name} (PID: {pid})...")
+                            os.kill(pid, signal.SIGKILL)
+                            killed_pids.append(pid)
+                        except OSError as e:
+                            logger.error(f"Error killing {name} (PID: {pid}): {e}")
+
+            if killed_pids:
+                logger.info(f"Killed {name} processes with PIDs: {killed_pids}")
+            else:
+                logger.info(f"No running {name} processes found")
+
+        except subprocess.SubprocessError as e:
+            logger.error(f"Error searching for {name} processes: {e}")
+
+    # Step 3: Create a fresh state
+    logger.info("All lokikit processes have been terminated")
+    logger.info("You can now start services with a clean state using: lokikit start")

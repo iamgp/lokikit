@@ -18,6 +18,7 @@ from lokikit.commands import (
     status_command,
     clean_command,
     watch_command,
+    force_quit_command,
 )
 from lokikit.logging import setup_logging
 
@@ -164,6 +165,15 @@ def watch(ctx, path, job, label):
     PATH is the file or directory to watch for logs (glob patterns supported).
     """
     watch_command(ctx, path, job, label)
+
+@cli.command(name="force-quit")
+@click.pass_context
+def force_quit(ctx):
+    """Find and kill all lokikit processes, including stale ones not tracked by PID file.
+
+    This resolves issues with stale processes and PID file mismatches.
+    """
+    force_quit_command(ctx)
 
 if __name__ == "__main__":
     cli()
