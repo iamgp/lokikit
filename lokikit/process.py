@@ -88,10 +88,11 @@ def service_is_accessible(host, port, timeout=0.5):
     s.settimeout(timeout)
     try:
         s.connect((host, int(port)))
-        s.close()
         return True
     except (socket.error, ValueError):
         return False
+    finally:
+        s.close()
 
 def wait_for_services(host, ports, procs, timeout=20):
     """Wait for services to start up properly.
@@ -154,7 +155,7 @@ def wait_for_services(host, ports, procs, timeout=20):
 
     return False
 
-def stop_services(pids):
+def stop_services(pids, force=False):
     """Stop running services by PIDs."""
     logger = get_logger()
     success = True
@@ -163,45 +164,50 @@ def stop_services(pids):
 
     for name, pid in pids.items():
         try:
-            logger.info(f"Stopping {name} (PID: {pid})...")
-            os.kill(pid, signal.SIGTERM)
-
-            # Wait a bit to see if the process terminates
-            for _ in range(20):  # Wait up to 2 seconds
-                try:
-                    # Check if process is still running
-                    os.kill(pid, 0)
-                    time.sleep(0.1)
-                except OSError:
-                    # Process is no longer running
-                    break
-
-            # Check one last time
-            try:
-                os.kill(pid, 0)
-                # If we get here, process is still running
-                logger.warning(f"Service {name} (PID: {pid}) did not terminate with SIGTERM, trying SIGKILL...")
+            if force:
+                logger.info(f"Force killing {name} (PID: {pid})...")
                 os.kill(pid, signal.SIGKILL)
+            else:
+                logger.info(f"Stopping {name} (PID: {pid})...")
+                os.kill(pid, signal.SIGTERM)
 
-                # Wait again after SIGKILL
-                for _ in range(10):  # Wait up to 1 second
+                # Wait a bit to see if the process terminates
+                for _ in range(20):  # Wait up to 2 seconds
                     try:
+                        # Check if process is still running
                         os.kill(pid, 0)
                         time.sleep(0.1)
                     except OSError:
-                        # Process is no longer running after SIGKILL
-                        stopped.append(name)
-                        logger.info(f"Service {name} stopped successfully with SIGKILL")
+                        # Process is no longer running
                         break
-                else:
-                    # If we get here, process still didn't terminate after SIGKILL
-                    failed.append(name)
-                    logger.error(f"Failed to stop {name} even with SIGKILL!")
-                    success = False
-            except OSError:
-                # Process is gone after SIGTERM
-                logger.info(f"Service {name} stopped successfully")
-                stopped.append(name)
+
+                # Check one last time
+                try:
+                    os.kill(pid, 0)
+                    # If we get here, process is still running
+                    logger.warning(f"Service {name} (PID: {pid}) did not terminate with SIGTERM, trying SIGKILL...")
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    # Process is gone after SIGTERM
+                    logger.info(f"Service {name} stopped successfully")
+                    stopped.append(name)
+                    continue  # Skip the rest of this iteration
+
+            # Wait after SIGKILL (either from force or from SIGTERM failure)
+            for _ in range(10):  # Wait up to 1 second
+                try:
+                    os.kill(pid, 0)
+                    time.sleep(0.1)
+                except OSError:
+                    # Process is no longer running after SIGKILL
+                    stopped.append(name)
+                    logger.info(f"Service {name} stopped successfully with SIGKILL")
+                    break
+            else:
+                # If we get here, process still didn't terminate after SIGKILL
+                failed.append(name)
+                logger.error(f"Failed to stop {name} even with SIGKILL!")
+                success = False
         except OSError as e:
             if e.errno == 3:  # No such process
                 logger.info(f"Service {name} (PID: {pid}) was not running")

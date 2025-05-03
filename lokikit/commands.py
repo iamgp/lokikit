@@ -404,22 +404,11 @@ def stop_command(ctx, force):
     services_stopped = False
 
     if pids:
-        if force:
-            logger.info("Force stopping services with SIGKILL...")
-            for name, pid in pids.items():
-                try:
-                    logger.info(f"Killing {name} (PID: {pid})...")
-                    os.kill(pid, signal.SIGKILL)
-                    services_stopped = True
-                except OSError as e:
-                    if e.errno == 3:  # No such process
-                        logger.info(f"Service {name} (PID: {pid}) was not running")
-                    else:
-                        logger.error(f"Error killing {name}: {e}")
-        else:
-            services_stopped = stop_services(pids)
+        services_stopped = stop_services(pids, force=force)
+        if not services_stopped:
+            logger.error("Failed to stop one or more services. Try using --force to terminate them.")
     else:
-        logger.info("No PID file found, searching for running processes by pattern...")
+        logger.warning("No PID file found, searching for running processes by pattern...")
 
     # Even if PID file doesn't exist, try to find and kill processes by pattern
     if not pids or not services_stopped:
@@ -471,8 +460,11 @@ def stop_command(ctx, force):
     # Remove PID file if it exists
     pid_file = os.path.join(base_dir, "lokikit.pid")
     if os.path.exists(pid_file):
-        os.remove(pid_file)
-        logger.info("Removed PID file.")
+        try:
+            os.remove(pid_file)
+            logger.info("Removed PID file.")
+        except OSError as e:
+            logger.error(f"Failed to remove PID file: {e}")
 
     logger.info("Operation completed.")
 
@@ -548,12 +540,17 @@ def clean_command(ctx):
     # Check if services are running and stop them first
     pids = read_pid_file(base_dir)
     if pids and check_services_running(pids):
-        logger.info("Stopping running services first...")
-        stop_services(pids)
+        logger.warning("Services are still running. Please stop them first using 'lokikit stop'.")
+        logger.info("Operation aborted.")
+        sys.exit(1)
 
     if os.path.exists(base_dir):
-        shutil.rmtree(base_dir)
-        logger.info("Cleaned up all files.")
+        try:
+            shutil.rmtree(base_dir)
+            logger.info("Cleaned up all files.")
+        except OSError as e:
+            logger.error(f"Failed to remove directory: {e}")
+            sys.exit(1)
     else:
         logger.info(f"Nothing to clean: directory {base_dir} does not exist.")
 
@@ -566,12 +563,13 @@ def watch_command(ctx, path, job, label):
 
     # Parse labels
     labels = {}
-    for lbl in label:
-        try:
-            key, value = lbl.split("=", 1)
-            labels[key.strip()] = value.strip()
-        except ValueError:
-            logger.warning(f"Ignoring invalid label format: {lbl}. Use key=value format.")
+    if label:  # Check if label is not None before iterating
+        for lbl in label:
+            try:
+                key, value = lbl.split("=", 1)
+                labels[key.strip()] = value.strip()
+            except ValueError:
+                logger.warning(f"Ignoring invalid label format: {lbl}. Use key=value format.")
 
     # Update promtail config
     if update_promtail_config(base_dir, path, job, labels):

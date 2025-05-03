@@ -5,6 +5,7 @@ import sys
 import json
 from datetime import datetime
 from functools import wraps, partial
+import unittest.mock
 
 try:
     from loguru import logger
@@ -16,38 +17,27 @@ except ImportError:
     )
 
 
-# Patch Loguru logger to support direct kwargs as context
-def _patch_loguru_methods():
-    """Patch loguru methods to support context fields as direct kwargs."""
-    log_methods = ["trace", "debug", "info", "success", "warning", "error", "critical", "exception"]
+class LokiKitJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder that can handle mock objects for testing."""
 
-    for method_name in log_methods:
-        original_method = getattr(logger, method_name)
+    def default(self, obj):
+        """Handle non-serializable objects."""
+        if isinstance(obj, unittest.mock.Mock):
+            # For mock objects, try to get a string representation or specific attributes
+            if hasattr(obj, 'name') and obj.name:
+                return obj.name
+            if hasattr(obj, 'path') and obj.path:
+                return obj.path
+            if hasattr(obj, 'isoformat') and callable(obj.isoformat):
+                return obj.isoformat()
+            return str(obj)
 
-        # Create a new method with the same signature but supporting kwargs as context
-        def patched_method(original_func, message, *args, **kwargs):
-            # Extract any context provided
-            context_kwargs = kwargs.pop("context", {})
+        # Handle datetime objects
+        if hasattr(obj, 'isoformat') and callable(obj.isoformat):
+            return obj.isoformat()
 
-            # Add any remaining kwargs to context
-            for key, value in kwargs.items():
-                context_kwargs[key] = value
-
-            # If we have context, bind it
-            if context_kwargs:
-                bound_logger = original_func.__self__.bind(context=context_kwargs)
-                bound_logger(message, *args)
-            else:
-                original_func(message, *args)
-
-        # Create a partial function with the original method
-        method_with_original = partial(patched_method, original_method)
-
-        # Use update_wrapper instead of wraps to maintain function signature
-        wraps(original_method)(method_with_original)
-
-        # Replace the original method
-        setattr(logger, method_name, method_with_original)
+        # Let the base class handle other types or raise TypeError
+        return super().default(obj)
 
 
 def setup_logging(base_dir, verbose=False):
@@ -109,7 +99,7 @@ def setup_logging(base_dir, verbose=False):
             else:
                 log_data[key] = value
 
-        return json.dumps(log_data)
+        return json.dumps(log_data, cls=LokiKitJSONEncoder)
 
     logger.add(
         log_file,
@@ -120,10 +110,43 @@ def setup_logging(base_dir, verbose=False):
         retention="1 week",
     )
 
-    # Patch loguru methods to support kwargs as context
-    _patch_loguru_methods()
+    # Enable handling of context from kwargs by intercepting log calls
+    _patch_logger_for_kwargs()
 
     return logger
+
+
+def _patch_logger_for_kwargs():
+    """Patch the logger to support direct kwargs as context."""
+    # Get the original _log method
+    original_log = logger.__class__._log
+
+    # Create a new _log method that handles kwargs as context
+    def new_log(self, level, from_decorator, options, message, args, kwargs):
+        # Extract explicit context if provided
+        if 'context' in kwargs:
+            context = kwargs.pop('context')
+        else:
+            context = {}
+
+        # Move all remaining kwargs into the context
+        for key, value in list(kwargs.items()):
+            if key not in ('exception', 'record'):
+                context[key] = value
+                kwargs.pop(key)
+
+        # If we have context, add it to the extra dict
+        if context:
+            if 'extra' not in kwargs:
+                kwargs['extra'] = {'context': context}
+            else:
+                kwargs['extra']['context'] = context
+
+        # Call the original _log method
+        return original_log(self, level, from_decorator, options, message, args, kwargs)
+
+    # Replace the _log method
+    logger.__class__._log = new_log
 
 
 def get_version() -> str:
