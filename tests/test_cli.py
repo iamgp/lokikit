@@ -2,21 +2,12 @@
 
 import os
 import tempfile
-import pytest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
-from lokikit.cli import (
-    cli,
-    setup,
-    start,
-    stop,
-    status,
-    clean,
-    watch,
-    force_quit
-)
+from lokikit.cli import cli
 
 
 @pytest.fixture
@@ -51,10 +42,12 @@ def cli_runner():
     return CliRunner()
 
 
-@patch('lokikit.cli.setup_logging')
-@patch('lokikit.cli.load_config_file')
-@patch('lokikit.cli.merge_config')
-def test_cli_base_with_defaults(mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env):
+@patch("lokikit.cli.setup_logging")
+@patch("lokikit.cli.load_config_file")
+@patch("lokikit.cli.merge_config")
+def test_cli_base_with_defaults(
+    mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env
+):
     """Test CLI with default options."""
     # Mock return values
     mock_logger = MagicMock()
@@ -66,7 +59,7 @@ def test_cli_base_with_defaults(mock_merge_config, mock_load_config, mock_setup_
         "host": "127.0.0.1",
         "grafana_port": 3000,
         "loki_port": 3100,
-        "promtail_port": 9080
+        "promtail_port": 9080,
     }
     mock_merge_config.return_value = default_config
 
@@ -84,10 +77,12 @@ def test_cli_base_with_defaults(mock_merge_config, mock_load_config, mock_setup_
     mock_merge_config.assert_called()
 
 
-@patch('lokikit.cli.setup_logging')
-@patch('lokikit.cli.load_config_file')
-@patch('lokikit.cli.merge_config')
-def test_cli_base_with_config_file(mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env):
+@patch("lokikit.cli.setup_logging")
+@patch("lokikit.cli.load_config_file")
+@patch("lokikit.cli.merge_config")
+def test_cli_base_with_config_file(
+    mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env
+):
     """Test CLI with config file option."""
     # Mock return values
     mock_logger = MagicMock()
@@ -97,7 +92,7 @@ def test_cli_base_with_config_file(mock_merge_config, mock_load_config, mock_set
         "host": "0.0.0.0",
         "grafana_port": 4000,
         "loki_port": 4100,
-        "promtail_port": 9090
+        "promtail_port": 9090,
     }
     mock_merge_config.return_value = mock_load_config.return_value
 
@@ -116,10 +111,12 @@ def test_cli_base_with_config_file(mock_merge_config, mock_load_config, mock_set
     mock_logger.debug.assert_called_once()
 
 
-@patch('lokikit.cli.setup_logging')
-@patch('lokikit.cli.load_config_file')
-@patch('lokikit.cli.merge_config')
-def test_cli_base_with_cli_options(mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env):
+@patch("lokikit.cli.setup_logging")
+@patch("lokikit.cli.load_config_file")
+@patch("lokikit.cli.merge_config")
+def test_cli_base_with_cli_options(
+    mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env
+):
     """Test CLI with command line options."""
     # Mock return values
     mock_logger = MagicMock()
@@ -133,21 +130,29 @@ def test_cli_base_with_cli_options(mock_merge_config, mock_load_config, mock_set
             "host": cli_options["host"],
             "grafana_port": cli_options["grafana_port"],
             "loki_port": cli_options["loki_port"],
-            "promtail_port": cli_options["promtail_port"]
+            "promtail_port": cli_options["promtail_port"],
         }
 
     mock_merge_config.side_effect = mock_merge_side_effect
 
     # Run CLI command with options and status subcommand
-    result = cli_test_env["runner"].invoke(cli, [
-        "--base-dir", "/custom/dir",
-        "--host", "0.0.0.0",
-        "--port", "4000",
-        "--loki-port", "4100",
-        "--promtail-port", "9090",
-        "--verbose",
-        "status"
-    ])
+    result = cli_test_env["runner"].invoke(
+        cli,
+        [
+            "--base-dir",
+            "/custom/dir",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "4000",
+            "--loki-port",
+            "4100",
+            "--promtail-port",
+            "9090",
+            "--verbose",
+            "status",
+        ],
+    )
 
     # Check result
     assert result.exit_code == 0
@@ -166,7 +171,7 @@ def test_cli_base_with_cli_options(mock_merge_config, mock_load_config, mock_set
     assert cli_options["promtail_port"] == 9090
 
 
-@patch('lokikit.cli.setup_command')
+@patch("lokikit.cli.setup_command")
 def test_setup_command(mock_setup_command, cli_runner):
     """Test the setup subcommand."""
     result = cli_runner.invoke(cli, ["setup"])
@@ -175,7 +180,7 @@ def test_setup_command(mock_setup_command, cli_runner):
     mock_setup_command.assert_called_once()
 
 
-@patch('lokikit.cli.start_command')
+@patch("lokikit.cli.start_command")
 def test_start_command_defaults(mock_start_command, cli_runner):
     """Test the start subcommand with default options."""
     # Call with positional args to match the implementation
@@ -188,7 +193,7 @@ def test_start_command_defaults(mock_start_command, cli_runner):
 
     # The CLI passes arguments positionally, not as kwargs
     args, kwargs = mock_start_command.call_args
-    ctx = args[0]  # First arg is the context
+    args[0]  # First arg is the context
     background = args[1]  # Second arg is background flag
     force = args[2]  # Third arg is force flag
     timeout = args[3]  # Fourth arg is timeout
@@ -198,7 +203,7 @@ def test_start_command_defaults(mock_start_command, cli_runner):
     assert timeout == 20
 
 
-@patch('lokikit.cli.start_command')
+@patch("lokikit.cli.start_command")
 def test_start_command_with_options(mock_start_command, cli_runner):
     """Test the start subcommand with custom options."""
     mock_start_command.return_value = None
@@ -210,7 +215,7 @@ def test_start_command_with_options(mock_start_command, cli_runner):
 
     # The CLI passes arguments positionally, not as kwargs
     args, kwargs = mock_start_command.call_args
-    ctx = args[0]  # First arg is the context
+    args[0]  # First arg is the context
     background = args[1]  # Second arg is background flag
     force = args[2]  # Third arg is force flag
     timeout = args[3]  # Fourth arg is timeout
@@ -220,7 +225,7 @@ def test_start_command_with_options(mock_start_command, cli_runner):
     assert timeout == 30
 
 
-@patch('lokikit.cli.stop_command')
+@patch("lokikit.cli.stop_command")
 def test_stop_command_defaults(mock_stop_command, cli_runner):
     """Test the stop subcommand with default options."""
     result = cli_runner.invoke(cli, ["stop"])
@@ -232,7 +237,7 @@ def test_stop_command_defaults(mock_stop_command, cli_runner):
     assert not kwargs.get("force", False)
 
 
-@patch('lokikit.cli.stop_command')
+@patch("lokikit.cli.stop_command")
 def test_stop_command_with_force(mock_stop_command, cli_runner):
     """Test the stop subcommand with force option."""
     # Add a return value to avoid potential issues
@@ -245,13 +250,13 @@ def test_stop_command_with_force(mock_stop_command, cli_runner):
 
     # CLI passes args positionally
     args, kwargs = mock_stop_command.call_args
-    ctx = args[0]  # First arg is the context
+    args[0]  # First arg is the context
     force = args[1]  # Second arg is force flag
 
     assert force is True
 
 
-@patch('lokikit.cli.status_command')
+@patch("lokikit.cli.status_command")
 def test_status_command(mock_status_command, cli_runner):
     """Test the status subcommand."""
     result = cli_runner.invoke(cli, ["status"])
@@ -260,7 +265,7 @@ def test_status_command(mock_status_command, cli_runner):
     mock_status_command.assert_called_once()
 
 
-@patch('lokikit.cli.clean_command')
+@patch("lokikit.cli.clean_command")
 def test_clean_command(mock_clean_command, cli_runner):
     """Test the clean subcommand."""
     result = cli_runner.invoke(cli, ["clean"])
@@ -269,7 +274,7 @@ def test_clean_command(mock_clean_command, cli_runner):
     mock_clean_command.assert_called_once()
 
 
-@patch('lokikit.cli.watch_command')
+@patch("lokikit.cli.watch_command")
 def test_watch_command(mock_watch_command, cli_runner):
     """Test the watch subcommand with default options."""
     # Add a return value to avoid potential issues
@@ -283,7 +288,7 @@ def test_watch_command(mock_watch_command, cli_runner):
 
     # CLI passes args positionally
     args, kwargs = mock_watch_command.call_args
-    ctx = args[0]  # First arg is the context
+    args[0]  # First arg is the context
     path = args[1]  # Second arg is path
     job = args[2]  # Third arg is job
     label = args[3]  # Fourth arg is label
@@ -293,26 +298,32 @@ def test_watch_command(mock_watch_command, cli_runner):
     assert label == ()  # Empty tuple for default
 
 
-@patch('lokikit.cli.watch_command')
+@patch("lokikit.cli.watch_command")
 def test_watch_command_with_options(mock_watch_command, cli_runner):
     """Test the watch subcommand with custom options."""
     # Add a return value to avoid potential issues
     mock_watch_command.return_value = None
 
-    result = cli_runner.invoke(cli, [
-        "watch",
-        "/var/log/test.log",
-        "--job", "test_job",
-        "--label", "app=test",
-        "--label", "env=dev"
-    ])
+    result = cli_runner.invoke(
+        cli,
+        [
+            "watch",
+            "/var/log/test.log",
+            "--job",
+            "test_job",
+            "--label",
+            "app=test",
+            "--label",
+            "env=dev",
+        ],
+    )
 
     assert result.exit_code == 0
     mock_watch_command.assert_called_once()
 
     # CLI passes args positionally
     args, kwargs = mock_watch_command.call_args
-    ctx = args[0]  # First arg is the context
+    args[0]  # First arg is the context
     path = args[1]  # Second arg is path
     job = args[2]  # Third arg is job
     label = args[3]  # Fourth arg is labels
@@ -322,7 +333,7 @@ def test_watch_command_with_options(mock_watch_command, cli_runner):
     assert label == ("app=test", "env=dev")
 
 
-@patch('lokikit.cli.force_quit_command')
+@patch("lokikit.cli.force_quit_command")
 def test_force_quit_command(mock_force_quit_command, cli_runner):
     """Test the force-quit subcommand."""
     result = cli_runner.invoke(cli, ["force-quit"])

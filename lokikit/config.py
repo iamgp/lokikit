@@ -1,6 +1,7 @@
 """Configuration module for lokikit."""
 
 import os
+
 import yaml
 
 # Default configuration values
@@ -70,6 +71,7 @@ scrape_configs:
           __path__: /var/log/*.log
 """
 
+
 def load_config_file(config_file):
     """Load configuration from YAML file."""
     if not os.path.exists(config_file):
@@ -77,12 +79,13 @@ def load_config_file(config_file):
         return {}
 
     try:
-        with open(config_file, "r") as f:
+        with open(config_file) as f:
             config = yaml.safe_load(f)
             return config if config else {}
     except Exception as e:
         print(f"Error loading config file: {e}")
         return {}
+
 
 def merge_config(cli_options, file_config):
     """Merge CLI options with file configuration, prioritizing CLI options."""
@@ -99,29 +102,41 @@ def merge_config(cli_options, file_config):
 
     return result
 
+
 def write_config(filename, content):
     """Write content to a configuration file."""
     with open(filename, "w") as f:
         f.write(content)
+
 
 def ensure_dir(path):
     """Ensure a directory exists."""
     if not os.path.exists(path):
         os.makedirs(path)
 
+
 def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
     """Update promtail config to add a new log path."""
     # Import logger here to avoid circular imports
     try:
         from lokikit.logging import get_logger
+
         logger = get_logger()
     except ImportError:
         # Fallback if logging module not available
         class FallbackLogger:
-            def info(self, msg, *args): print(msg % args if args else msg)
-            def error(self, msg, *args): print(f"Error: {msg % args if args else msg}")
-            def warning(self, msg, *args): print(f"Warning: {msg % args if args else msg}")
-            def debug(self, msg, *args): pass
+            def info(self, msg, *args):
+                print(msg % args if args else msg)
+
+            def error(self, msg, *args):
+                print(f"Error: {msg % args if args else msg}")
+
+            def warning(self, msg, *args):
+                print(f"Warning: {msg % args if args else msg}")
+
+            def debug(self, msg, *args):
+                pass
+
         logger = FallbackLogger()
 
     # Default values
@@ -135,7 +150,7 @@ def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
         return False
 
     try:
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config = yaml.safe_load(f)
     except Exception as e:
         logger.error(f"Error loading Promtail config: {e}")
@@ -167,14 +182,8 @@ def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
         new_job = {
             "job_name": job_name,
             "static_configs": [
-                {
-                    "targets": ["localhost"],
-                    "labels": {
-                        "job": job_name,
-                        "__path__": abs_log_path
-                    }
-                }
-            ]
+                {"targets": ["localhost"], "labels": {"job": job_name, "__path__": abs_log_path}}
+            ],
         }
 
         # Add custom labels

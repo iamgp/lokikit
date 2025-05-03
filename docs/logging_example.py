@@ -7,9 +7,9 @@ keeping console output minimal.
 """
 
 import os
-import sys
 from datetime import datetime
-from lokikit.logging import setup_logging, get_logger
+
+from lokikit.logging import get_logger, setup_logging
 
 # Assuming we're running from the project root
 base_dir = os.path.expanduser("~/.lokikit")
@@ -24,7 +24,9 @@ logger.debug("This debug message will appear in the log file but not console")
 logger.warning("Warning: this is a warning message")
 
 # Using direct kwargs for context (simplest approach)
-logger.info("Processing configuration file", file_path="/etc/myapp/config.yaml", environment="development")
+logger.info(
+    "Processing configuration file", file_path="/etc/myapp/config.yaml", environment="development"
+)
 
 # You can still use the explicit context parameter if preferred
 logger.info("User profile loaded", context={"user_id": "12345", "session_id": "abc-123"})
@@ -40,15 +42,17 @@ user_logger.info("User updated profile", action="profile_update", changes=["emai
 # Error logging with exception information
 try:
     result = 1 / 0
-except Exception as e:
+except Exception:
     # Loguru automatically captures exception information
     logger.exception("An error occurred during calculation")
 
     # With additional context via kwargs
-    logger.error("Failed to perform division operation",
-                operation="division",
-                operands=[1, 0],
-                component="calculator")
+    logger.error(
+        "Failed to perform division operation",
+        operation="division",
+        operands=[1, 0],
+        component="calculator",
+    )
 
 # You can also temporarily add context using with statement
 with logger.contextualize(context={"request_id": "req-456", "api": "users"}):
@@ -60,13 +64,15 @@ with logger.contextualize(context={"request_id": "req-456", "api": "users"}):
 
 logger.success("Application completed successfully")  # Loguru has more log levels!
 
-print("\nCheck the log file at: " + os.path.join(base_dir, "logs",
-                                               f"lokikit_{datetime.now().strftime('%Y%m%d')}.log"))
+print(
+    "\nCheck the log file at: "
+    + os.path.join(base_dir, "logs", f"lokikit_{datetime.now().strftime('%Y%m%d')}.log")
+)
 print("The log file contains structured JSON that will work well with Loki queries.")
 print("Example LogQL queries:")
-print("  {job=\"lokikit\"} | json | level=\"ERROR\"")
-print("  {job=\"lokikit\"} | json | context.user_id=\"12345\"")
-print("  {job=\"lokikit\"} | json | context.component=\"calculator\"")
+print('  {job="lokikit"} | json | level="ERROR"')
+print('  {job="lokikit"} | json | context.user_id="12345"')
+print('  {job="lokikit"} | json | context.component="calculator"')
 
 # Example LogQL queries for this structured logging:
 #

@@ -1,13 +1,14 @@
 """Tests for the LokiKit logging module."""
 
-import os
 import json
-import tempfile
-import pytest
-from unittest.mock import patch, MagicMock
-
 import logging as standard_logging
-from lokikit.logging import setup_logging, get_logger, get_version
+import os
+import tempfile
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from lokikit.logging import get_version, setup_logging
 
 
 @pytest.fixture
@@ -34,8 +35,9 @@ def test_log_file_creation(temp_log_dir):
     # Find the created log file
     files = os.listdir(logs_dir)
     assert files, "No log files were created"
-    assert any(f.startswith("lokikit_") and f.endswith(".log") for f in files), \
-        "No lokikit log file found"
+    assert any(
+        f.startswith("lokikit_") and f.endswith(".log") for f in files
+    ), "No lokikit log file found"
 
 
 @pytest.fixture
@@ -47,11 +49,11 @@ def logging_setup():
     serializer = None
 
     # Set up mock for log file
-    with patch('lokikit.logging.logger.add') as mock_add:
+    with patch("lokikit.logging.logger.add") as mock_add:
         # Capture the serializer function when logger.add is called
         def capture_serializer(*args, **kwargs):
             nonlocal serializer
-            serializer = kwargs.get('serialize')
+            serializer = kwargs.get("serialize")
 
         mock_add.side_effect = capture_serializer
 
@@ -77,7 +79,7 @@ def logging_setup():
             "line": 42,
             "function": "test_function",
             "exception": None,
-            "extra": {}
+            "extra": {},
         }
 
         # Set up the logger
@@ -142,7 +144,7 @@ def test_exception_serialization(logging_setup):
 
 def test_intercept_handler():
     """Test that InterceptHandler forwards messages to loguru."""
-    with patch('lokikit.logging.logger.opt') as mock_opt:
+    with patch("lokikit.logging.logger.opt") as mock_opt:
         # Create a standard logging record
         record = standard_logging.LogRecord(
             name="test_logger",
@@ -151,7 +153,7 @@ def test_intercept_handler():
             lineno=42,
             msg="Test message",
             args=(),
-            exc_info=None
+            exc_info=None,
         )
 
         # Set up mock for the bound logger
@@ -160,6 +162,7 @@ def test_intercept_handler():
 
         # Import handler and call emit
         from lokikit.logging import InterceptHandler
+
         handler = InterceptHandler()
         handler.emit(record)
 
@@ -171,12 +174,12 @@ def test_intercept_handler():
 
 def test_get_version_success():
     """Test successful version retrieval."""
-    with patch('importlib.metadata.version') as mock_version:
+    with patch("importlib.metadata.version") as mock_version:
         mock_version.return_value = "1.2.3"
         assert get_version() == "1.2.3"
 
 
 def test_get_version_failure():
     """Test version retrieval failure handling."""
-    with patch('importlib.metadata.version', side_effect=Exception("Test error")):
+    with patch("importlib.metadata.version", side_effect=Exception("Test error")):
         assert get_version() == "unknown"

@@ -2,25 +2,26 @@
 
 import click
 
+from lokikit.commands import (
+    clean_command,
+    force_quit_command,
+    setup_command,
+    start_command,
+    status_command,
+    stop_command,
+    watch_command,
+)
 from lokikit.config import (
     DEFAULT_BASE_DIR,
-    DEFAULT_HOST,
     DEFAULT_GRAFANA_PORT,
+    DEFAULT_HOST,
     DEFAULT_LOKI_PORT,
     DEFAULT_PROMTAIL_PORT,
     load_config_file,
     merge_config,
 )
-from lokikit.commands import (
-    setup_command,
-    start_command,
-    stop_command,
-    status_command,
-    clean_command,
-    watch_command,
-    force_quit_command,
-)
 from lokikit.logging import setup_logging
+
 
 @click.group()
 @click.option(
@@ -59,7 +60,8 @@ from lokikit.logging import setup_logging
     help="Path to YAML configuration file to override default options.",
 )
 @click.option(
-    "--verbose", "-v",
+    "--verbose",
+    "-v",
     is_flag=True,
     default=False,
     help="Enable verbose logging for debugging.",
@@ -100,47 +102,45 @@ def cli(ctx, base_dir, host, port, loki_port, promtail_port, config, verbose):
     # Store all config in context for commands to access
     ctx.obj["CONFIG"] = merged_config
 
+
 @cli.command()
 @click.pass_context
 def setup(ctx):
     """Download binaries and write config files."""
     setup_command(ctx)
 
+
 @cli.command()
 @click.option(
     "--background",
     is_flag=True,
     default=False,
-    help="Run services in the background and return to terminal."
+    help="Run services in the background and return to terminal.",
 )
 @click.option(
-    "--force",
-    is_flag=True,
-    default=False,
-    help="Force start even if services are already running."
+    "--force", is_flag=True, default=False, help="Force start even if services are already running."
 )
 @click.option(
     "--timeout",
     default=20,
     type=int,
-    help="Maximum time to wait for services to start (in seconds)."
+    help="Maximum time to wait for services to start (in seconds).",
 )
 @click.pass_context
 def start(ctx, background, force, timeout):
     """Start Loki, Promtail, and Grafana."""
     start_command(ctx, background, force, timeout)
 
+
 @cli.command()
 @click.option(
-    "--force",
-    is_flag=True,
-    default=False,
-    help="Use SIGKILL to forcefully terminate services."
+    "--force", is_flag=True, default=False, help="Use SIGKILL to forcefully terminate services."
 )
 @click.pass_context
 def stop(ctx, force):
     """Stop running services."""
     stop_command(ctx, force)
+
 
 @cli.command()
 @click.pass_context
@@ -148,16 +148,20 @@ def status(ctx):
     """Check if services are running."""
     status_command(ctx)
 
+
 @cli.command()
 @click.pass_context
 def clean(ctx):
     """Remove all downloaded files and configs."""
     clean_command(ctx)
 
+
 @cli.command()
 @click.argument("path")
 @click.option("--job", help="Job name for the log path.")
-@click.option("--label", multiple=True, help="Labels in format key=value. Can be specified multiple times.")
+@click.option(
+    "--label", multiple=True, help="Labels in format key=value. Can be specified multiple times."
+)
 @click.pass_context
 def watch(ctx, path, job, label):
     """Add a log path to Promtail configuration.
@@ -165,6 +169,7 @@ def watch(ctx, path, job, label):
     PATH is the file or directory to watch for logs (glob patterns supported).
     """
     watch_command(ctx, path, job, label)
+
 
 @cli.command(name="force-quit")
 @click.pass_context
@@ -174,6 +179,7 @@ def force_quit(ctx):
     This resolves issues with stale processes and PID file mismatches.
     """
     force_quit_command(ctx)
+
 
 if __name__ == "__main__":
     cli()

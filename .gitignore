@@ -13,3 +13,15 @@ __pycache__
 *.pyz
 *.pywz
 build
+dist/
+.venv/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.basedpyright_cache/
+.idea/
+*.swp
+*.swo
+.DS_Store

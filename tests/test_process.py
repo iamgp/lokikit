@@ -1,21 +1,20 @@
 """Tests for the LokiKit process module."""
 
 import os
-import socket
-import time
 import signal
 import tempfile
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, mock_open, call
 
 from lokikit.process import (
-    start_process,
-    write_pid_file,
-    read_pid_file,
     check_services_running,
+    read_pid_file,
     service_is_accessible,
+    start_process,
+    stop_services,
     wait_for_services,
-    stop_services
+    write_pid_file,
 )
 
 
@@ -37,13 +36,13 @@ def temp_setup():
 @pytest.fixture
 def mock_logger():
     """Set up logger mock."""
-    with patch('lokikit.process.get_logger') as mock_get_logger:
+    with patch("lokikit.process.get_logger") as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
         yield mock_logger
 
 
-@patch('subprocess.Popen')
+@patch("subprocess.Popen")
 def test_start_process(mock_popen, temp_setup, mock_logger):
     """Test starting a process."""
     temp_dir, log_file = temp_setup
@@ -69,7 +68,7 @@ def test_write_pid_file(temp_setup, mock_logger):
     # Check file exists and contains correct PIDs
     assert os.path.exists(pid_file)
 
-    with open(pid_file, "r") as f:
+    with open(pid_file) as f:
         content = f.read()
 
     for name, pid in pids.items():
@@ -125,8 +124,8 @@ def test_read_pid_file_invalid(temp_setup):
     os.remove(pid_file)
 
 
-@patch('os.kill')
-@patch('subprocess.run')
+@patch("os.kill")
+@patch("subprocess.run")
 def test_check_services_running_all_running(mock_run, mock_kill):
     """Test checking all services running by PID."""
     # All services are running (os.kill doesn't raise exception)
@@ -141,8 +140,8 @@ def test_check_services_running_all_running(mock_run, mock_kill):
     mock_run.assert_not_called()  # Shouldn't need to use pgrep
 
 
-@patch('os.kill')
-@patch('subprocess.run')
+@patch("os.kill")
+@patch("subprocess.run")
 def test_check_services_running_none_running(mock_run, mock_kill):
     """Test checking when no services are running."""
     # No services are running (os.kill raises OSError)
@@ -160,8 +159,8 @@ def test_check_services_running_none_running(mock_run, mock_kill):
     assert mock_run.call_count == 3  # Should try pgrep for each service
 
 
-@patch('os.kill')
-@patch('subprocess.run')
+@patch("os.kill")
+@patch("subprocess.run")
 def test_check_services_running_some_found_by_pattern(mock_run, mock_kill):
     """Test finding services by pattern when PIDs have changed."""
     # All services fail by PID but some found by pattern
@@ -191,7 +190,7 @@ def test_check_services_running_some_found_by_pattern(mock_run, mock_kill):
     assert pids["loki"] == 1500
 
 
-@patch('socket.socket')
+@patch("socket.socket")
 def test_service_is_accessible_success(mock_socket):
     """Test checking if a service is accessible."""
     # Set up mock for socket connection success
@@ -205,12 +204,12 @@ def test_service_is_accessible_success(mock_socket):
     mock_socket_instance.close.assert_called_once()
 
 
-@patch('socket.socket')
+@patch("socket.socket")
 def test_service_is_accessible_failure(mock_socket):
     """Test checking if a service is not accessible."""
     # Set up mock for socket connection failure
     mock_socket_instance = MagicMock()
-    mock_socket_instance.connect.side_effect = socket.error()
+    mock_socket_instance.connect.side_effect = OSError()
     mock_socket.return_value = mock_socket_instance
 
     result = service_is_accessible("localhost", 3000)
@@ -219,8 +218,8 @@ def test_service_is_accessible_failure(mock_socket):
     mock_socket_instance.close.assert_called_once()
 
 
-@patch('lokikit.process.service_is_accessible')
-@patch('time.sleep')
+@patch("lokikit.process.service_is_accessible")
+@patch("time.sleep")
 def test_wait_for_services_success(mock_sleep, mock_is_accessible, mock_logger):
     """Test waiting for services to be accessible."""
     # First call returns False, second call returns True
@@ -240,8 +239,8 @@ def test_wait_for_services_success(mock_sleep, mock_is_accessible, mock_logger):
     process.poll.assert_called()
 
 
-@patch('lokikit.process.service_is_accessible')
-@patch('time.sleep')
+@patch("lokikit.process.service_is_accessible")
+@patch("time.sleep")
 def test_wait_for_services_timeout(mock_sleep, mock_is_accessible, mock_logger):
     """Test timeout while waiting for services."""
     # Service never becomes accessible
@@ -261,7 +260,7 @@ def test_wait_for_services_timeout(mock_sleep, mock_is_accessible, mock_logger):
     process.poll.assert_called()
 
 
-@patch('lokikit.process.service_is_accessible')
+@patch("lokikit.process.service_is_accessible")
 def test_wait_for_services_process_terminated(mock_is_accessible, mock_logger):
     """Test early return if process terminates while waiting."""
     mock_is_accessible.return_value = False
@@ -272,7 +271,12 @@ def test_wait_for_services_process_terminated(mock_is_accessible, mock_logger):
 
     # Set up a side effect list that can be consumed multiple times
     # Return None first time, then 1 (error code)
-    process.poll.side_effect = [None, 1, None, 1]  # Double the values to handle possible multiple calls
+    process.poll.side_effect = [
+        None,
+        1,
+        None,
+        1,
+    ]  # Double the values to handle possible multiple calls
 
     procs = {"grafana": process}
 
@@ -282,7 +286,7 @@ def test_wait_for_services_process_terminated(mock_is_accessible, mock_logger):
     assert result is False
 
 
-@patch('lokikit.process.service_is_accessible')
+@patch("lokikit.process.service_is_accessible")
 def test_wait_for_services_0_0_0_0(mock_is_accessible, mock_logger):
     """Test behavior when host is 0.0.0.0."""
     mock_is_accessible.return_value = True
@@ -299,8 +303,8 @@ def test_wait_for_services_0_0_0_0(mock_is_accessible, mock_logger):
     mock_is_accessible.assert_called_with("127.0.0.1", 3000)
 
 
-@patch('os.kill')
-@patch('time.sleep')
+@patch("os.kill")
+@patch("time.sleep")
 def test_stop_services_success(mock_sleep, mock_kill, mock_logger):
     """Test stopping services normally."""
     pids = {"loki": 1000, "promtail": 2000, "grafana": 3000}
@@ -313,7 +317,7 @@ def test_stop_services_success(mock_sleep, mock_kill, mock_logger):
     kill_effects = []
 
     # For each service:
-    for pid in [1000, 2000, 3000]:
+    for _pid in [1000, 2000, 3000]:
         # SIGTERM call (success)
         kill_effects.append(None)
         # First signal 0 check should raise OSError (process terminated by SIGTERM)
@@ -335,8 +339,8 @@ def test_stop_services_success(mock_sleep, mock_kill, mock_logger):
     mock_kill.assert_any_call(3000, signal.SIGTERM)
 
 
-@patch('os.kill')
-@patch('time.sleep')
+@patch("os.kill")
+@patch("time.sleep")
 def test_stop_services_requires_sigkill(mock_sleep, mock_kill, mock_logger):
     """Test stopping services that require SIGKILL."""
     pids = {"loki": 1000}
@@ -367,8 +371,8 @@ def test_stop_services_requires_sigkill(mock_sleep, mock_kill, mock_logger):
     assert mock_kill.call_count >= 23
 
 
-@patch('os.kill')
-@patch('time.sleep')
+@patch("os.kill")
+@patch("time.sleep")
 def test_stop_services_sigkill_fails(mock_sleep, mock_kill, mock_logger):
     """Test when both SIGTERM and SIGKILL fail."""
     pids = {"loki": 1000}
@@ -392,7 +396,7 @@ def test_stop_services_sigkill_fails(mock_sleep, mock_kill, mock_logger):
     assert mock_kill.call_count >= 22
 
 
-@patch('os.kill')
+@patch("os.kill")
 def test_stop_services_not_running(mock_kill, mock_logger):
     """Test stopping services that aren't running."""
     pids = {"loki": 1000, "promtail": 2000, "grafana": 3000}
@@ -406,8 +410,8 @@ def test_stop_services_not_running(mock_kill, mock_logger):
     assert mock_kill.call_count == 3
 
 
-@patch('os.kill')
-@patch('time.sleep')
+@patch("os.kill")
+@patch("time.sleep")
 def test_stop_services_permission_error(mock_sleep, mock_kill, mock_logger):
     """Test permission error when stopping services."""
     pids = {"loki": 1000}

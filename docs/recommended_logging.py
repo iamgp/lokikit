@@ -5,13 +5,13 @@ and Grafana visualization. It uses structured JSON logging to enable powerful
 querying with LogQL.
 """
 
-import os
-import sys
 import json
 import logging
+import os
+import sys
 import traceback
 from datetime import datetime
-from typing import Dict, Any, Optional, Union, Callable
+from typing import Any, Dict, Optional, Union
 
 
 class StructuredJsonFormatter(logging.Formatter):
@@ -48,17 +48,16 @@ class StructuredJsonFormatter(logging.Formatter):
             "thread": record.threadName,
             "service": self.service_name,
             "message": record.getMessage(),
-
             # Add file and line information for debugging
             "location": {
                 "file": record.pathname,
                 "line": record.lineno,
                 "function": record.funcName,
-            }
+            },
         }
 
         # Add custom fields from record attributes
-        if hasattr(record, 'context') and isinstance(record.context, dict):
+        if hasattr(record, "context") and isinstance(record.context, dict):
             log_data["context"] = record.context
 
         # Add exception info if present
@@ -66,17 +65,38 @@ class StructuredJsonFormatter(logging.Formatter):
             log_data["exception"] = {
                 "type": record.exc_info[0].__name__,
                 "message": str(record.exc_info[1]),
-                "traceback": traceback.format_exception(*record.exc_info)
+                "traceback": traceback.format_exception(*record.exc_info),
             }
 
         # Add any fields passed to logger.log(..., extra={...})
-        if hasattr(record, '__dict__'):
+        if hasattr(record, "__dict__"):
             for key, value in record.__dict__.items():
-                if key not in ('args', 'asctime', 'created', 'exc_info', 'exc_text',
-                               'filename', 'funcName', 'id', 'levelname', 'levelno',
-                               'lineno', 'module', 'msecs', 'message', 'msg', 'name',
-                               'pathname', 'process', 'processName', 'relativeCreated',
-                               'stack_info', 'thread', 'threadName', 'context'):
+                if key not in (
+                    "args",
+                    "asctime",
+                    "created",
+                    "exc_info",
+                    "exc_text",
+                    "filename",
+                    "funcName",
+                    "id",
+                    "levelname",
+                    "levelno",
+                    "lineno",
+                    "module",
+                    "msecs",
+                    "message",
+                    "msg",
+                    "name",
+                    "pathname",
+                    "process",
+                    "processName",
+                    "relativeCreated",
+                    "stack_info",
+                    "thread",
+                    "threadName",
+                    "context",
+                ):
                     log_data[key] = value
 
         # Add any additional fields from initialization
@@ -111,17 +131,17 @@ class ContextAdapter(logging.LoggerAdapter):
         Returns:
             Tuple of (message, keyword args)
         """
-        if 'extra' not in kwargs:
-            kwargs['extra'] = {}
-        if 'context' not in kwargs['extra']:
-            kwargs['extra']['context'] = {}
+        if "extra" not in kwargs:
+            kwargs["extra"] = {}
+        if "context" not in kwargs["extra"]:
+            kwargs["extra"]["context"] = {}
 
         # Add adapter's context to the record's context
-        kwargs['extra']['context'].update(self.extra)
+        kwargs["extra"]["context"].update(self.extra)
 
         return msg, kwargs
 
-    def bind(self, **kwargs) -> 'ContextAdapter':
+    def bind(self, **kwargs) -> "ContextAdapter":
         """Create a new logger with additional context values.
 
         Args:
@@ -188,10 +208,7 @@ def setup_structured_logging(
     return ContextAdapter(logger)
 
 
-def get_logger(
-    module_name: str,
-    context: Optional[Dict[str, Any]] = None
-) -> ContextAdapter:
+def get_logger(module_name: str, context: Optional[Dict[str, Any]] = None) -> ContextAdapter:
     """Get a logger with context for a specific module.
 
     Args:
@@ -215,7 +232,7 @@ if __name__ == "__main__":
         additional_fields={
             "environment": "development",
             "version": "1.0.0",
-        }
+        },
     )
 
     # Simple usage
@@ -232,8 +249,9 @@ if __name__ == "__main__":
     try:
         result = 1 / 0
     except Exception:
-        logger.exception("An error occurred during calculation",
-                         extra={"context": {"operation": "division"}})
+        logger.exception(
+            "An error occurred during calculation", extra={"context": {"operation": "division"}}
+        )
 
 # Sample LogQL queries for effective filtering in Grafana:
 #

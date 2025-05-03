@@ -1,17 +1,22 @@
 """Tests for the LokiKit commands module."""
 
+import contextlib
 import os
 import tempfile
-import platform
-import pytest
-from unittest.mock import patch, MagicMock, call, mock_open
-import asyncio
-from typing import cast, List
 import unittest.mock
-import sys
-import yaml
+from unittest.mock import MagicMock, patch
 
-from lokikit.commands import setup_command, start_command, stop_command, status_command, watch_command, clean_command, force_quit_command
+import pytest
+
+from lokikit.commands import (
+    clean_command,
+    force_quit_command,
+    setup_command,
+    start_command,
+    status_command,
+    stop_command,
+    watch_command,
+)
 
 
 @pytest.fixture
@@ -26,11 +31,11 @@ def setup_test_env():
         "GRAFANA_PORT": 3000,
         "LOKI_PORT": 3100,
         "PROMTAIL_PORT": 9080,
-        "CONFIG": {}
+        "CONFIG": {},
     }
 
     # Setup logger mock
-    with patch('lokikit.commands.get_logger') as mock_get_logger:
+    with patch("lokikit.commands.get_logger") as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
 
@@ -46,18 +51,26 @@ def setup_test_env():
 
 
 @pytest.mark.parametrize("binaries_exist", [False, True])
-@patch('lokikit.commands.get_binaries')
-@patch('lokikit.commands.download_and_extract')
-@patch('lokikit.commands.find_grafana_binary')
-@patch('lokikit.commands.ensure_dir')
-@patch('lokikit.commands.write_config')
-@patch('os.chmod')
-@patch('os.path.exists')
-@patch('builtins.open', new_callable=unittest.mock.mock_open)
-def test_setup_command(mock_open, mock_exists, mock_chmod, mock_write_config,
-                       mock_ensure_dir, mock_find_grafana,
-                       mock_download, mock_get_binaries,
-                       setup_test_env, binaries_exist):
+@patch("lokikit.commands.get_binaries")
+@patch("lokikit.commands.download_and_extract")
+@patch("lokikit.commands.find_grafana_binary")
+@patch("lokikit.commands.ensure_dir")
+@patch("lokikit.commands.write_config")
+@patch("os.chmod")
+@patch("os.path.exists")
+@patch("builtins.open", new_callable=unittest.mock.mock_open)
+def test_setup_command(
+    mock_open,
+    mock_exists,
+    mock_chmod,
+    mock_write_config,
+    mock_ensure_dir,
+    mock_find_grafana,
+    mock_download,
+    mock_get_binaries,
+    setup_test_env,
+    binaries_exist,
+):
     """Test setup command execution with various conditions."""
     ctx, temp_dir, mock_logger = setup_test_env
 
@@ -67,27 +80,27 @@ def test_setup_command(mock_open, mock_exists, mock_chmod, mock_write_config,
             "version": "2.5.0",
             "binary": "loki-linux-amd64",
             "url": "https://example.com/loki.zip",
-            "filename": "loki-linux-amd64.zip"
+            "filename": "loki-linux-amd64.zip",
         },
         "promtail": {
             "version": "2.5.0",
             "binary": "promtail-linux-amd64",
             "url": "https://example.com/promtail.zip",
-            "filename": "promtail-linux-amd64.zip"
+            "filename": "promtail-linux-amd64.zip",
         },
         "grafana": {
             "version": "9.0.0",
             "binary_name": "grafana-server",
             "url": "https://example.com/grafana.tar.gz",
-            "filename": "grafana-9.0.0.linux-amd64.tar.gz"
+            "filename": "grafana-9.0.0.linux-amd64.tar.gz",
         },
-        "os_name": "linux"
+        "os_name": "linux",
     }
     mock_get_binaries.return_value = binaries
 
     # Mock that binaries exist or don't exist based on parameter
     def exists_side_effect(path):
-        if 'conf/provisioning/datasources/lokikit.yaml' in path:
+        if "conf/provisioning/datasources/lokikit.yaml" in path:
             return False  # Always create the datasource file
         return binaries_exist
 
@@ -118,16 +131,21 @@ def test_setup_command(mock_open, mock_exists, mock_chmod, mock_write_config,
     mock_logger.info.assert_called()
 
 
-@patch('lokikit.commands.get_binaries')
-@patch('lokikit.commands.download_and_extract')
-@patch('lokikit.commands.find_grafana_binary')
-@patch('lokikit.commands.ensure_dir')
-@patch('lokikit.commands.write_config')
-@patch('os.path.exists')
-def test_setup_command_with_custom_log_paths(mock_exists, mock_write_config,
-                                          mock_ensure_dir, mock_find_grafana,
-                                          mock_download, mock_get_binaries,
-                                          setup_test_env):
+@patch("lokikit.commands.get_binaries")
+@patch("lokikit.commands.download_and_extract")
+@patch("lokikit.commands.find_grafana_binary")
+@patch("lokikit.commands.ensure_dir")
+@patch("lokikit.commands.write_config")
+@patch("os.path.exists")
+def test_setup_command_with_custom_log_paths(
+    mock_exists,
+    mock_write_config,
+    mock_ensure_dir,
+    mock_find_grafana,
+    mock_download,
+    mock_get_binaries,
+    setup_test_env,
+):
     """Test setup command with custom log paths in config."""
     ctx, temp_dir, mock_logger = setup_test_env
 
@@ -137,36 +155,27 @@ def test_setup_command_with_custom_log_paths(mock_exists, mock_write_config,
             "version": "2.5.0",
             "binary": "loki-linux-amd64",
             "url": "https://example.com/loki.zip",
-            "filename": "loki-linux-amd64.zip"
+            "filename": "loki-linux-amd64.zip",
         },
         "promtail": {
             "version": "2.5.0",
             "binary": "promtail-linux-amd64",
             "url": "https://example.com/promtail.zip",
-            "filename": "promtail-linux-amd64.zip"
+            "filename": "promtail-linux-amd64.zip",
         },
         "grafana": {
             "version": "9.0.0",
             "binary_name": "grafana-server",
             "url": "https://example.com/grafana.tar.gz",
-            "filename": "grafana-9.0.0.linux-amd64.tar.gz"
+            "filename": "grafana-9.0.0.linux-amd64.tar.gz",
         },
-        "os_name": "linux"
+        "os_name": "linux",
     }
     mock_get_binaries.return_value = binaries
 
     # Set up custom log paths in config
     ctx.obj["CONFIG"] = {
-        "promtail": {
-            "log_paths": [
-                {
-                    "path": "/var/log/test.log",
-                    "labels": {
-                        "job": "test"
-                    }
-                }
-            ]
-        }
+        "promtail": {"log_paths": [{"path": "/var/log/test.log", "labels": {"job": "test"}}]}
     }
 
     # Mock that binaries already exist
@@ -203,11 +212,11 @@ def start_test_env():
         "GRAFANA_PORT": 3000,
         "LOKI_PORT": 3100,
         "PROMTAIL_PORT": 9080,
-        "CONFIG": {}
+        "CONFIG": {},
     }
 
     # Setup logger mock
-    with patch('lokikit.commands.get_logger') as mock_get_logger:
+    with patch("lokikit.commands.get_logger") as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
 
@@ -232,20 +241,29 @@ def start_test_env():
     os.rmdir(temp_dir)
 
 
-@patch('lokikit.commands.get_binaries')
-@patch('lokikit.commands.get_binary_path')
-@patch('lokikit.commands.check_services_running')
-@patch('lokikit.commands.start_process')
-@patch('lokikit.commands.wait_for_services')
-@patch('lokikit.commands.write_pid_file')
-@patch('lokikit.commands.read_pid_file')
-@patch('lokikit.commands.ensure_dir')
-@patch('os.path.exists')
-@patch('sys.exit')
-def test_start_command_foreground(mock_exit, mock_exists, mock_ensure_dir, mock_read_pid, mock_write_pid,
-                                 mock_wait, mock_start, mock_check,
-                                 mock_get_binary, mock_get_binaries,
-                                 start_test_env):
+@patch("lokikit.commands.get_binaries")
+@patch("lokikit.commands.get_binary_path")
+@patch("lokikit.commands.check_services_running")
+@patch("lokikit.commands.start_process")
+@patch("lokikit.commands.wait_for_services")
+@patch("lokikit.commands.write_pid_file")
+@patch("lokikit.commands.read_pid_file")
+@patch("lokikit.commands.ensure_dir")
+@patch("os.path.exists")
+@patch("sys.exit")
+def test_start_command_foreground(
+    mock_exit,
+    mock_exists,
+    mock_ensure_dir,
+    mock_read_pid,
+    mock_write_pid,
+    mock_wait,
+    mock_start,
+    mock_check,
+    mock_get_binary,
+    mock_get_binaries,
+    start_test_env,
+):
     """Test start command in foreground mode."""
     ctx, temp_dir, mock_logger, pid_file = start_test_env
 
@@ -260,7 +278,7 @@ def test_start_command_foreground(mock_exit, mock_exists, mock_ensure_dir, mock_
         "loki": {"binary": "loki-linux-amd64", "version": "2.5.0"},
         "promtail": {"binary": "promtail-linux-amd64", "version": "2.5.0"},
         "grafana": {"binary_name": "grafana-server", "version": "9.0.0"},
-        "os_name": "linux"
+        "os_name": "linux",
     }
     mock_get_binaries.return_value = binaries
 
@@ -272,9 +290,9 @@ def test_start_command_foreground(mock_exit, mock_exists, mock_ensure_dir, mock_
     def get_binary_path_side_effect(name, binaries, base_dir):
         if name == "loki":
             return loki_path
-        elif name == "promtail":
+        if name == "promtail":
             return promtail_path
-        elif name == "grafana":
+        if name == "grafana":
             return grafana_path
         return None
 
@@ -285,9 +303,7 @@ def test_start_command_foreground(mock_exit, mock_exists, mock_ensure_dir, mock_
 
     # Mock config files exists
     def exists_side_effect(path):
-        if path.endswith("lokikit.pid"):
-            return False
-        return True
+        return not path.endswith("lokikit.pid")
 
     mock_exists.side_effect = exists_side_effect
 
@@ -304,20 +320,29 @@ def test_start_command_foreground(mock_exit, mock_exists, mock_ensure_dir, mock_
     mock_write_pid.assert_called_once()
 
 
-@patch('lokikit.commands.get_binaries')
-@patch('lokikit.commands.get_binary_path')
-@patch('lokikit.commands.check_services_running')
-@patch('lokikit.commands.start_process')
-@patch('lokikit.commands.wait_for_services')
-@patch('lokikit.commands.write_pid_file')
-@patch('lokikit.commands.read_pid_file')
-@patch('lokikit.commands.ensure_dir')
-@patch('os.path.exists')
-@patch('sys.exit')
-def test_start_command_background(mock_exit, mock_exists, mock_ensure_dir, mock_read_pid, mock_write_pid,
-                                 mock_wait, mock_start, mock_check,
-                                 mock_get_binary, mock_get_binaries,
-                                 start_test_env):
+@patch("lokikit.commands.get_binaries")
+@patch("lokikit.commands.get_binary_path")
+@patch("lokikit.commands.check_services_running")
+@patch("lokikit.commands.start_process")
+@patch("lokikit.commands.wait_for_services")
+@patch("lokikit.commands.write_pid_file")
+@patch("lokikit.commands.read_pid_file")
+@patch("lokikit.commands.ensure_dir")
+@patch("os.path.exists")
+@patch("sys.exit")
+def test_start_command_background(
+    mock_exit,
+    mock_exists,
+    mock_ensure_dir,
+    mock_read_pid,
+    mock_write_pid,
+    mock_wait,
+    mock_start,
+    mock_check,
+    mock_get_binary,
+    mock_get_binaries,
+    start_test_env,
+):
     """Test start command in background mode."""
     ctx, temp_dir, mock_logger, pid_file = start_test_env
 
@@ -332,7 +357,7 @@ def test_start_command_background(mock_exit, mock_exists, mock_ensure_dir, mock_
         "loki": {"binary": "loki-linux-amd64", "version": "2.5.0"},
         "promtail": {"binary": "promtail-linux-amd64", "version": "2.5.0"},
         "grafana": {"binary_name": "grafana-server", "version": "9.0.0"},
-        "os_name": "linux"
+        "os_name": "linux",
     }
     mock_get_binaries.return_value = binaries
 
@@ -344,9 +369,9 @@ def test_start_command_background(mock_exit, mock_exists, mock_ensure_dir, mock_
     def get_binary_path_side_effect(name, binaries, base_dir):
         if name == "loki":
             return loki_path
-        elif name == "promtail":
+        if name == "promtail":
             return promtail_path
-        elif name == "grafana":
+        if name == "grafana":
             return grafana_path
         return None
 
@@ -357,9 +382,7 @@ def test_start_command_background(mock_exit, mock_exists, mock_ensure_dir, mock_
 
     # Mock config files exists
     def exists_side_effect(path):
-        if path.endswith("lokikit.pid"):
-            return False
-        return True
+        return not path.endswith("lokikit.pid")
 
     mock_exists.side_effect = exists_side_effect
 
@@ -463,19 +486,29 @@ def test_start_command_background(mock_exit, mock_exists, mock_ensure_dir, mock_
 #     mock_logger.error.assert_called()
 
 
-@patch('lokikit.commands.stop_services')
-@patch('lokikit.commands.get_binaries')
-@patch('lokikit.commands.get_binary_path')
-@patch('lokikit.commands.check_services_running')
-@patch('lokikit.commands.start_process')
-@patch('lokikit.commands.wait_for_services')
-@patch('lokikit.commands.read_pid_file')
-@patch('os.path.exists')
-@patch('os.remove')
-@patch('sys.exit')
-def test_start_command_with_force(mock_exit, mock_remove, mock_exists, mock_read_pid, mock_wait, mock_start, mock_check,
-                                 mock_get_binary, mock_get_binaries,
-                                 mock_stop_services, start_test_env):
+@patch("lokikit.commands.stop_services")
+@patch("lokikit.commands.get_binaries")
+@patch("lokikit.commands.get_binary_path")
+@patch("lokikit.commands.check_services_running")
+@patch("lokikit.commands.start_process")
+@patch("lokikit.commands.wait_for_services")
+@patch("lokikit.commands.read_pid_file")
+@patch("os.path.exists")
+@patch("os.remove")
+@patch("sys.exit")
+def test_start_command_with_force(
+    mock_exit,
+    mock_remove,
+    mock_exists,
+    mock_read_pid,
+    mock_wait,
+    mock_start,
+    mock_check,
+    mock_get_binary,
+    mock_get_binaries,
+    mock_stop_services,
+    start_test_env,
+):
     """Test start command with --force flag to restart running services."""
     ctx, temp_dir, mock_logger, pid_file = start_test_env
 
@@ -491,7 +524,7 @@ def test_start_command_with_force(mock_exit, mock_remove, mock_exists, mock_read
         "loki": {"binary": "loki-linux-amd64"},
         "promtail": {"binary": "promtail-linux-amd64"},
         "grafana": {"binary_name": "grafana-server"},
-        "os_name": "linux"
+        "os_name": "linux",
     }
     mock_get_binaries.return_value = binaries
 
@@ -503,9 +536,9 @@ def test_start_command_with_force(mock_exit, mock_remove, mock_exists, mock_read
     def get_binary_path_side_effect(binary, binaries, base_dir):
         if binary == "loki":
             return loki_path
-        elif binary == "promtail":
+        if binary == "promtail":
             return promtail_path
-        elif binary == "grafana":
+        if binary == "grafana":
             return grafana_path
         return None
 
@@ -544,18 +577,27 @@ def test_start_command_with_force(mock_exit, mock_remove, mock_exists, mock_read
     mock_logger.info.assert_called()
 
 
-@patch('lokikit.commands.get_binaries')
-@patch('lokikit.commands.get_binary_path')
-@patch('lokikit.commands.check_services_running')
-@patch('lokikit.commands.start_process')
-@patch('lokikit.commands.ensure_dir')
-@patch('lokikit.commands.find_grafana_binary')
-@patch('lokikit.commands.read_pid_file')
-@patch('os.path.exists')
-@patch('sys.exit')
-def test_start_missing_configs(mock_exit, mock_exists, mock_read_pid, mock_find_grafana,
-                               mock_ensure_dir, mock_start_process, mock_check,
-                               mock_get_binary, mock_get_binaries, start_test_env):
+@patch("lokikit.commands.get_binaries")
+@patch("lokikit.commands.get_binary_path")
+@patch("lokikit.commands.check_services_running")
+@patch("lokikit.commands.start_process")
+@patch("lokikit.commands.ensure_dir")
+@patch("lokikit.commands.find_grafana_binary")
+@patch("lokikit.commands.read_pid_file")
+@patch("os.path.exists")
+@patch("sys.exit")
+def test_start_missing_configs(
+    mock_exit,
+    mock_exists,
+    mock_read_pid,
+    mock_find_grafana,
+    mock_ensure_dir,
+    mock_start_process,
+    mock_check,
+    mock_get_binary,
+    mock_get_binaries,
+    start_test_env,
+):
     """Test start command when config files are missing."""
     ctx, temp_dir, mock_logger, pid_file = start_test_env
 
@@ -576,14 +618,14 @@ def test_start_missing_configs(mock_exit, mock_exists, mock_read_pid, mock_find_
         "loki": {"binary": "loki-linux-amd64", "version": "2.5.0"},
         "promtail": {"binary": "promtail-linux-amd64", "version": "2.5.0"},
         "grafana": {"binary_name": "grafana-server", "version": "9.0.0"},
-        "os_name": "linux"
+        "os_name": "linux",
     }
     mock_get_binaries.return_value = binaries
 
     # Mock binary paths
-    loki_path = os.path.join(temp_dir, "loki-linux-amd64")
-    promtail_path = os.path.join(temp_dir, "promtail-linux-amd64")
-    grafana_path = os.path.join(temp_dir, "grafana-server")
+    os.path.join(temp_dir, "loki-linux-amd64")
+    os.path.join(temp_dir, "promtail-linux-amd64")
+    os.path.join(temp_dir, "grafana-server")
 
     def get_binary_path_side_effect(name, binaries, base_dir):
         # Force this to return None for a binary to cause failure
@@ -625,11 +667,11 @@ def stop_test_env():
         "GRAFANA_PORT": 3000,
         "LOKI_PORT": 3100,
         "PROMTAIL_PORT": 9080,
-        "CONFIG": {}
+        "CONFIG": {},
     }
 
     # Setup logger mock
-    with patch('lokikit.commands.get_logger') as mock_get_logger:
+    with patch("lokikit.commands.get_logger") as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
 
@@ -644,12 +686,14 @@ def stop_test_env():
     os.rmdir(temp_dir)
 
 
-@patch('lokikit.commands.read_pid_file')
-@patch('lokikit.commands.stop_services')
-@patch('os.path.exists')
-@patch('os.remove')
-@patch('sys.exit')
-def test_stop_command_success(mock_exit, mock_remove, mock_exists, mock_stop, mock_read_pid, stop_test_env):
+@patch("lokikit.commands.read_pid_file")
+@patch("lokikit.commands.stop_services")
+@patch("os.path.exists")
+@patch("os.remove")
+@patch("sys.exit")
+def test_stop_command_success(
+    mock_exit, mock_remove, mock_exists, mock_stop, mock_read_pid, stop_test_env
+):
     """Test stopping services successfully."""
     ctx, temp_dir, mock_logger = stop_test_env
 
@@ -728,9 +772,9 @@ def test_stop_command_success(mock_exit, mock_remove, mock_exists, mock_stop, mo
 #     assert any("Failed to stop one or more services" in str(call) for call in mock_logger.error.call_args_list)
 
 
-@patch('lokikit.commands.read_pid_file')
-@patch('os.path.exists')
-@patch('sys.exit')
+@patch("lokikit.commands.read_pid_file")
+@patch("os.path.exists")
+@patch("sys.exit")
 def test_stop_command_no_pid_file(mock_exit, mock_exists, mock_read_pid, stop_test_env):
     """Test handling when no PID file exists."""
     ctx, temp_dir, mock_logger = stop_test_env
@@ -748,12 +792,14 @@ def test_stop_command_no_pid_file(mock_exit, mock_exists, mock_read_pid, stop_te
     assert any("No PID file found" in str(call) for call in mock_logger.warning.call_args_list)
 
 
-@patch('lokikit.commands.read_pid_file')
-@patch('lokikit.commands.stop_services')
-@patch('os.path.exists')
-@patch('os.remove')
-@patch('sys.exit')
-def test_stop_command_with_force(mock_exit, mock_remove, mock_exists, mock_stop, mock_read_pid, stop_test_env):
+@patch("lokikit.commands.read_pid_file")
+@patch("lokikit.commands.stop_services")
+@patch("os.path.exists")
+@patch("os.remove")
+@patch("sys.exit")
+def test_stop_command_with_force(
+    mock_exit, mock_remove, mock_exists, mock_stop, mock_read_pid, stop_test_env
+):
     """Test stopping services with force option."""
     ctx, temp_dir, mock_logger = stop_test_env
 
@@ -779,7 +825,9 @@ def test_stop_command_with_force(mock_exit, mock_remove, mock_exists, mock_stop,
     stop_command(ctx, True)
 
     # Test mock_stop was called with the right parameters
-    assert mock_stop.call_count == 1, f"Expected stop_services to be called once but was called {mock_stop.call_count} times"
+    assert (
+        mock_stop.call_count == 1
+    ), f"Expected stop_services to be called once but was called {mock_stop.call_count} times"
 
     # Get the actual args that were passed
     args, kwargs = mock_stop.call_args
@@ -788,7 +836,7 @@ def test_stop_command_with_force(mock_exit, mock_remove, mock_exists, mock_stop,
     assert args[0] == pids, f"Expected first argument to be {pids}, got {args[0]}"
 
     # Verify the force parameter was correctly passed
-    assert kwargs.get('force') is True, f"Expected force=True, got {kwargs.get('force')}"
+    assert kwargs.get("force") is True, f"Expected force=True, got {kwargs.get('force')}"
 
     # Verify PID file was removed
     pid_file = os.path.join(temp_dir, "lokikit.pid")
@@ -811,11 +859,11 @@ def status_test_env():
         "GRAFANA_PORT": 3000,
         "LOKI_PORT": 3100,
         "PROMTAIL_PORT": 9080,
-        "CONFIG": {}
+        "CONFIG": {},
     }
 
     # Setup logger mock
-    with patch('lokikit.commands.get_logger') as mock_get_logger:
+    with patch("lokikit.commands.get_logger") as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
 
@@ -830,9 +878,9 @@ def status_test_env():
     os.rmdir(temp_dir)
 
 
-@patch('lokikit.commands.read_pid_file')
-@patch('lokikit.commands.check_services_running')
-@patch('lokikit.commands.click.echo')
+@patch("lokikit.commands.read_pid_file")
+@patch("lokikit.commands.check_services_running")
+@patch("lokikit.commands.click.echo")
 def test_status_all_running(mock_echo, mock_check, mock_read_pid, status_test_env):
     """Test status when all services are running."""
     ctx, temp_dir, mock_logger = status_test_env
@@ -863,8 +911,8 @@ def test_status_all_running(mock_echo, mock_check, mock_read_pid, status_test_en
     assert any_running
 
 
-@patch('lokikit.commands.read_pid_file')
-@patch('lokikit.commands.check_services_running')
+@patch("lokikit.commands.read_pid_file")
+@patch("lokikit.commands.check_services_running")
 def test_status_not_running(mock_check, mock_read_pid, status_test_env):
     """Test status when services are not running."""
     ctx, temp_dir, mock_logger = status_test_env
@@ -895,7 +943,7 @@ def test_status_not_running(mock_check, mock_read_pid, status_test_env):
     assert any_not_running
 
 
-@patch('lokikit.commands.read_pid_file')
+@patch("lokikit.commands.read_pid_file")
 def test_status_no_pid_file(mock_read_pid, status_test_env):
     """Test status when no PID file exists."""
     ctx, temp_dir, mock_logger = status_test_env
@@ -913,7 +961,10 @@ def test_status_no_pid_file(mock_read_pid, status_test_env):
     any_not_started = False
     for call_args in mock_logger.info.call_args_list:
         call_str = str(call_args)
-        if any(msg in call_str.lower() for msg in ["not started", "not running", "no services", "appear"]):
+        if any(
+            msg in call_str.lower()
+            for msg in ["not started", "not running", "no services", "appear"]
+        ):
             any_not_started = True
             break
     assert any_not_started
@@ -926,13 +977,10 @@ def watch_test_env():
 
     # Create mock context
     ctx = MagicMock()
-    ctx.obj = {
-        "BASE_DIR": temp_dir,
-        "CONFIG": {}
-    }
+    ctx.obj = {"BASE_DIR": temp_dir, "CONFIG": {}}
 
     # Setup logger mock
-    with patch('lokikit.commands.get_logger') as mock_get_logger:
+    with patch("lokikit.commands.get_logger") as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
 
@@ -947,7 +995,7 @@ def watch_test_env():
     os.rmdir(temp_dir)
 
 
-@patch('lokikit.commands.update_promtail_config')
+@patch("lokikit.commands.update_promtail_config")
 def test_watch_command_success(mock_update, watch_test_env):
     """Test watch command with successful update."""
     ctx, temp_dir, mock_logger = watch_test_env
@@ -963,10 +1011,12 @@ def test_watch_command_success(mock_update, watch_test_env):
     mock_update.assert_called_once_with(temp_dir, path, None, {})
 
     # Verify debug logging at minimum
-    mock_logger.debug.assert_any_call(f"Adding log path '{path}' with job 'None' to Promtail config...")
+    mock_logger.debug.assert_any_call(
+        f"Adding log path '{path}' with job 'None' to Promtail config..."
+    )
 
 
-@patch('lokikit.commands.update_promtail_config')
+@patch("lokikit.commands.update_promtail_config")
 def test_watch_command_with_options(mock_update, watch_test_env):
     """Test watch command with job name and labels."""
     ctx, temp_dir, mock_logger = watch_test_env
@@ -993,10 +1043,12 @@ def test_watch_command_with_options(mock_update, watch_test_env):
     assert labels_dict["env"] == "dev"
 
     # Verify debug logging at minimum
-    mock_logger.debug.assert_any_call(f"Adding log path '{path}' with job '{job}' to Promtail config...")
+    mock_logger.debug.assert_any_call(
+        f"Adding log path '{path}' with job '{job}' to Promtail config..."
+    )
 
 
-@patch('lokikit.commands.update_promtail_config')
+@patch("lokikit.commands.update_promtail_config")
 def test_watch_command_failure(mock_update, watch_test_env):
     """Test watch command with update failure."""
     ctx, temp_dir, mock_logger = watch_test_env
@@ -1020,7 +1072,7 @@ def test_watch_command_failure(mock_update, watch_test_env):
     assert any_no_changes
 
 
-@patch('lokikit.commands.update_promtail_config')
+@patch("lokikit.commands.update_promtail_config")
 def test_watch_command_invalid_label(mock_update, watch_test_env):
     """Test watch command with invalid label format."""
     ctx, temp_dir, mock_logger = watch_test_env
@@ -1048,13 +1100,10 @@ def clean_test_env():
 
     # Create mock context
     ctx = MagicMock()
-    ctx.obj = {
-        "BASE_DIR": temp_dir,
-        "CONFIG": {}
-    }
+    ctx.obj = {"BASE_DIR": temp_dir, "CONFIG": {}}
 
     # Setup logger mock
-    with patch('lokikit.commands.get_logger') as mock_get_logger:
+    with patch("lokikit.commands.get_logger") as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
 
@@ -1074,10 +1123,10 @@ def clean_test_env():
     os.rmdir(temp_dir)
 
 
-@patch('lokikit.commands.check_services_running')
-@patch('lokikit.commands.read_pid_file')
-@patch('shutil.rmtree')
-@patch('sys.exit')
+@patch("lokikit.commands.check_services_running")
+@patch("lokikit.commands.read_pid_file")
+@patch("shutil.rmtree")
+@patch("sys.exit")
 def test_clean_command_success(mock_exit, mock_rmtree, mock_read_pid, mock_check, clean_test_env):
     """Test clean command with successful removal."""
     ctx, temp_dir, mock_logger = clean_test_env
@@ -1096,11 +1145,13 @@ def test_clean_command_success(mock_exit, mock_rmtree, mock_read_pid, mock_check
     mock_logger.info.assert_called()
 
 
-@patch('lokikit.commands.check_services_running')
-@patch('lokikit.commands.read_pid_file')
-@patch('shutil.rmtree')
-@patch('sys.exit')
-def test_clean_command_services_running(mock_exit, mock_rmtree, mock_read_pid, mock_check, clean_test_env):
+@patch("lokikit.commands.check_services_running")
+@patch("lokikit.commands.read_pid_file")
+@patch("shutil.rmtree")
+@patch("sys.exit")
+def test_clean_command_services_running(
+    mock_exit, mock_rmtree, mock_read_pid, mock_check, clean_test_env
+):
     """Test clean command with services still running."""
     ctx, temp_dir, mock_logger = clean_test_env
 
@@ -1123,10 +1174,8 @@ def test_clean_command_services_running(mock_exit, mock_rmtree, mock_read_pid, m
     mock_exit.side_effect = fake_exit
 
     # Run command
-    try:
+    with contextlib.suppress(SystemExit):
         clean_command(ctx)
-    except SystemExit:
-        pass
 
     # Verify rmtree was not called - the function should return early
     mock_rmtree.assert_not_called()
@@ -1135,15 +1184,19 @@ def test_clean_command_services_running(mock_exit, mock_rmtree, mock_read_pid, m
     mock_exit.assert_called_once_with(1)
 
     # Verify warning was logged
-    assert any("Services are still running" in str(call) for call in mock_logger.warning.call_args_list)
+    assert any(
+        "Services are still running" in str(call) for call in mock_logger.warning.call_args_list
+    )
 
 
-@patch('lokikit.commands.check_services_running')
-@patch('lokikit.commands.read_pid_file')
-@patch('shutil.rmtree')
-@patch('os.path.exists')
-@patch('sys.exit')
-def test_clean_command_removal_error(mock_exit, mock_exists, mock_rmtree, mock_read_pid, mock_check, clean_test_env):
+@patch("lokikit.commands.check_services_running")
+@patch("lokikit.commands.read_pid_file")
+@patch("shutil.rmtree")
+@patch("os.path.exists")
+@patch("sys.exit")
+def test_clean_command_removal_error(
+    mock_exit, mock_exists, mock_rmtree, mock_read_pid, mock_check, clean_test_env
+):
     """Test clean command with directory removal error."""
     ctx, temp_dir, mock_logger = clean_test_env
 
@@ -1164,10 +1217,8 @@ def test_clean_command_removal_error(mock_exit, mock_exists, mock_rmtree, mock_r
     mock_exit.side_effect = fake_exit
 
     # Run command
-    try:
+    with contextlib.suppress(SystemExit):
         clean_command(ctx)
-    except SystemExit:
-        pass
 
     # Verify error was logged and sys.exit was called
     mock_logger.error.assert_called()
@@ -1181,13 +1232,10 @@ def force_quit_test_env():
 
     # Create mock context
     ctx = MagicMock()
-    ctx.obj = {
-        "BASE_DIR": temp_dir,
-        "CONFIG": {}
-    }
+    ctx.obj = {"BASE_DIR": temp_dir, "CONFIG": {}}
 
     # Setup logger mock
-    with patch('lokikit.commands.get_logger') as mock_get_logger:
+    with patch("lokikit.commands.get_logger") as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
 
@@ -1207,11 +1255,13 @@ def force_quit_test_env():
     os.rmdir(temp_dir)
 
 
-@patch('subprocess.run')
-@patch('os.path.exists')
-@patch('os.remove')
-@patch('sys.exit')
-def test_force_quit_command_success(mock_exit, mock_remove, mock_exists, mock_run, force_quit_test_env):
+@patch("subprocess.run")
+@patch("os.path.exists")
+@patch("os.remove")
+@patch("sys.exit")
+def test_force_quit_command_success(
+    mock_exit, mock_remove, mock_exists, mock_run, force_quit_test_env
+):
     """Test force-quit command with successful termination."""
     ctx, temp_dir, mock_logger, pid_file = force_quit_test_env
 
@@ -1234,9 +1284,9 @@ def test_force_quit_command_success(mock_exit, mock_remove, mock_exists, mock_ru
     mock_logger.info.assert_called()
 
 
-@patch('subprocess.run')
-@patch('os.path.exists')
-@patch('sys.exit')
+@patch("subprocess.run")
+@patch("os.path.exists")
+@patch("sys.exit")
 def test_force_quit_command_no_processes(mock_exit, mock_exists, mock_run, force_quit_test_env):
     """Test force-quit command with no running processes."""
     ctx, temp_dir, mock_logger, pid_file = force_quit_test_env
@@ -1257,11 +1307,13 @@ def test_force_quit_command_no_processes(mock_exit, mock_exists, mock_run, force
     mock_logger.info.assert_called()
 
 
-@patch('subprocess.run')
-@patch('os.path.exists')
-@patch('os.remove')
-@patch('sys.exit')
-def test_force_quit_command_kill_error(mock_exit, mock_remove, mock_exists, mock_run, force_quit_test_env):
+@patch("subprocess.run")
+@patch("os.path.exists")
+@patch("os.remove")
+@patch("sys.exit")
+def test_force_quit_command_kill_error(
+    mock_exit, mock_remove, mock_exists, mock_run, force_quit_test_env
+):
     """Test force-quit command with kill command error."""
     ctx, temp_dir, mock_logger, pid_file = force_quit_test_env
 
@@ -1272,7 +1324,7 @@ def test_force_quit_command_kill_error(mock_exit, mock_remove, mock_exists, mock
     def mock_run_side_effect(*args, **kwargs):
         if args[0][0] == "pgrep":
             return MagicMock(returncode=0, stdout="1000 2000 3000")
-        elif args[0][0] == "kill":
+        if args[0][0] == "kill":
             return MagicMock(returncode=1, stderr="Operation not permitted")
         return MagicMock(returncode=0, stdout="")
 

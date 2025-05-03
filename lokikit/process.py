@@ -1,11 +1,14 @@
 """Process management module for lokikit."""
 
+import contextlib
 import os
-import time
 import signal
 import socket
 import subprocess
+import time
+
 from lokikit.logging import get_logger
+
 
 def start_process(cmd, log_file):
     """Start a process and return the Popen object."""
@@ -13,6 +16,7 @@ def start_process(cmd, log_file):
     logger.info(f"Starting: {' '.join(cmd)}")
     with open(log_file, "w") as f:
         return subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT)
+
 
 def write_pid_file(pids, base_dir):
     """Write process IDs to a file for background mode."""
@@ -24,6 +28,7 @@ def write_pid_file(pids, base_dir):
     logger.debug(f"Process IDs written to {pid_file}")
     return pid_file
 
+
 def read_pid_file(base_dir):
     """Read process IDs from the PID file."""
     pid_file = os.path.join(base_dir, "lokikit.pid")
@@ -31,15 +36,14 @@ def read_pid_file(base_dir):
         return None
 
     pids = {}
-    with open(pid_file, "r") as f:
+    with open(pid_file) as f:
         for line in f:
             if "=" in line:
                 name, pid_str = line.strip().split("=", 1)
-                try:
+                with contextlib.suppress(ValueError):
                     pids[name] = int(pid_str)
-                except ValueError:
-                    pass
     return pids
+
 
 def check_services_running(pids):
     """Check if services with the given PIDs are running."""
@@ -66,9 +70,7 @@ def check_services_running(pids):
                 # Try to find by pattern
                 try:
                     result = subprocess.run(
-                        ["pgrep", "-f", pattern],
-                        capture_output=True,
-                        text=True
+                        ["pgrep", "-f", pattern], capture_output=True, text=True, check=False
                     )
                     if result.returncode == 0 and result.stdout.strip():
                         # Found a match, pick the first one
@@ -82,6 +84,7 @@ def check_services_running(pids):
 
     return all_running
 
+
 def service_is_accessible(host, port, timeout=0.5):
     """Check if a service is accessible on the given host and port."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -89,10 +92,11 @@ def service_is_accessible(host, port, timeout=0.5):
     try:
         s.connect((host, int(port)))
         return True
-    except (socket.error, ValueError):
+    except (OSError, ValueError):
         return False
     finally:
         s.close()
+
 
 def wait_for_services(host, ports, procs, timeout=20):
     """Wait for services to start up properly.
@@ -109,7 +113,7 @@ def wait_for_services(host, ports, procs, timeout=20):
     logger = get_logger()
     start_time = time.time()
     all_ready = False
-    statuses = {name: {"ready": False} for name in ports.keys()}
+    statuses = {name: {"ready": False} for name in ports}
 
     logger.info("Waiting for services to start...")
 
@@ -129,10 +133,9 @@ def wait_for_services(host, ports, procs, timeout=20):
         # Check service accessibility
         for name, port in ports.items():
             check_host = "127.0.0.1" if host == "0.0.0.0" else host
-            if service_is_accessible(check_host, port):
-                if not statuses[name]["ready"]:
-                    logger.info(f"✓ {name.capitalize()} is ready on port {port}")
-                    statuses[name]["ready"] = True
+            if service_is_accessible(check_host, port) and not statuses[name]["ready"]:
+                logger.info(f"✓ {name.capitalize()} is ready on port {port}")
+                statuses[name]["ready"] = True
 
         # Check if all services are ready
         all_ready = all(status["ready"] for status in statuses.values())
@@ -154,6 +157,7 @@ def wait_for_services(host, ports, procs, timeout=20):
         logger.warning(f"Services that failed to start: {', '.join(not_ready)}")
 
     return False
+
 
 def stop_services(pids, force=False):
     """Stop running services by PIDs."""
@@ -185,7 +189,9 @@ def stop_services(pids, force=False):
                 try:
                     os.kill(pid, 0)
                     # If we get here, process is still running
-                    logger.warning(f"Service {name} (PID: {pid}) did not terminate with SIGTERM, trying SIGKILL...")
+                    logger.warning(
+                        f"Service {name} (PID: {pid}) did not terminate with SIGTERM, trying SIGKILL..."
+                    )
                     os.kill(pid, signal.SIGKILL)
                 except OSError:
                     # Process is gone after SIGTERM

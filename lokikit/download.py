@@ -1,13 +1,14 @@
 """Download module for lokikit."""
 
+import glob
+import json
 import os
 import platform
-import urllib.request
-import json
-import zipfile
-import tarfile
-import glob
 import subprocess
+import tarfile
+import urllib.request
+import zipfile
+
 
 def detect_platform():
     """Detect the current operating system and architecture."""
@@ -31,6 +32,7 @@ def detect_platform():
 
     return os_name, arch
 
+
 def get_latest_loki_version():
     """Get the latest Loki version from GitHub API."""
     url = "https://api.github.com/repos/grafana/loki/releases/latest"
@@ -38,12 +40,14 @@ def get_latest_loki_version():
         data = json.load(resp)
         return data["tag_name"].lstrip("v")
 
+
 def get_latest_grafana_version():
     """Get the latest Grafana version from GitHub API."""
     url = "https://api.github.com/repos/grafana/grafana/releases/latest"
     with urllib.request.urlopen(url) as resp:
         data = json.load(resp)
         return data["tag_name"].lstrip("v")
+
 
 def get_binaries(base_dir):
     """Get download URLs and paths for binaries."""
@@ -100,6 +104,7 @@ def get_binaries(base_dir):
         "os_name": os_name,
     }
 
+
 def download_and_extract(url, dest, filename):
     """Download and extract a binary archive."""
     print(f"Downloading {url} ...")
@@ -113,13 +118,14 @@ def download_and_extract(url, dest, filename):
         with tarfile.open(local_path, "r:gz") as tar_ref:
             tar_ref.extractall(dest)
 
+
 def find_grafana_binary(base_dir, binary_name, grafana_version):
     """Find the grafana-server binary after extraction."""
     # Try different version patterns
     potential_patterns = [
         f"grafana-{grafana_version}*/**/{binary_name}",  # Without v prefix
-        f"grafana-v{grafana_version}*/**/{binary_name}", # With v prefix
-        f"**/grafana-*{grafana_version}*/**/{binary_name}", # Any form
+        f"grafana-v{grafana_version}*/**/{binary_name}",  # With v prefix
+        f"**/grafana-*{grafana_version}*/**/{binary_name}",  # Any form
     ]
 
     # Search for the executable binary, not just any file named grafana-server
@@ -164,12 +170,16 @@ def find_grafana_binary(base_dir, binary_name, grafana_version):
         result = subprocess.run(
             ["find", base_dir, "-name", binary_name, "-type", "f", "-executable"],
             capture_output=True,
-            text=True
+            text=True,
+            check=False,
         )
         if result.returncode == 0 and result.stdout.strip():
             # Filter out packaging files
-            binaries = [line for line in result.stdout.strip().split('\n')
-                       if line and "packaging" not in line]
+            binaries = [
+                line
+                for line in result.stdout.strip().split("\n")
+                if line and "packaging" not in line
+            ]
             if binaries:
                 print(f"Found Grafana binary using find command: {binaries[0]}")
                 return binaries[0]
@@ -180,14 +190,14 @@ def find_grafana_binary(base_dir, binary_name, grafana_version):
     print(f"Could not find Grafana binary {binary_name} in {base_dir}")
     return None
 
+
 def get_binary_path(name, binaries, base_dir):
     """Get path to binary, with special handling for grafana."""
     if name in ["loki", "promtail"]:
         return os.path.join(base_dir, binaries[name]["binary"])
-    elif name == "grafana":
+    if name == "grafana":
         # For grafana, we need to find the binary after extraction
         return find_grafana_binary(
-            base_dir,
-            binaries["grafana"]["binary_name"],
-            binaries["grafana"]["version"]
+            base_dir, binaries["grafana"]["binary_name"], binaries["grafana"]["version"]
         )
+    return None

@@ -1,19 +1,17 @@
 """Logging configuration for lokikit using Loguru."""
 
+import json
 import os
 import sys
-import json
-from datetime import datetime
-from functools import wraps, partial
 import unittest.mock
+from datetime import datetime
 
 try:
     from loguru import logger
 except ImportError:
     # Add loguru to dependencies in setup.py
     raise ImportError(
-        "Loguru is required for LokiKit logging. "
-        "Please install it with: pip install loguru"
+        "Loguru is required for LokiKit logging. " "Please install it with: pip install loguru"
     )
 
 
@@ -24,16 +22,16 @@ class LokiKitJSONEncoder(json.JSONEncoder):
         """Handle non-serializable objects."""
         if isinstance(obj, unittest.mock.Mock):
             # For mock objects, try to get a string representation or specific attributes
-            if hasattr(obj, 'name') and obj.name:
+            if hasattr(obj, "name") and obj.name:
                 return obj.name
-            if hasattr(obj, 'path') and obj.path:
+            if hasattr(obj, "path") and obj.path:
                 return obj.path
-            if hasattr(obj, 'isoformat') and callable(obj.isoformat):
+            if hasattr(obj, "isoformat") and callable(obj.isoformat):
                 return obj.isoformat()
             return str(obj)
 
         # Handle datetime objects
-        if hasattr(obj, 'isoformat') and callable(obj.isoformat):
+        if hasattr(obj, "isoformat") and callable(obj.isoformat):
             return obj.isoformat()
 
         # Let the base class handle other types or raise TypeError
@@ -124,23 +122,20 @@ def _patch_logger_for_kwargs():
     # Create a new _log method that handles kwargs as context
     def new_log(self, level, from_decorator, options, message, args, kwargs):
         # Extract explicit context if provided
-        if 'context' in kwargs:
-            context = kwargs.pop('context')
-        else:
-            context = {}
+        context = kwargs.pop("context") if "context" in kwargs else {}
 
         # Move all remaining kwargs into the context
         for key, value in list(kwargs.items()):
-            if key not in ('exception', 'record'):
+            if key not in ("exception", "record"):
                 context[key] = value
                 kwargs.pop(key)
 
         # If we have context, add it to the extra dict
         if context:
-            if 'extra' not in kwargs:
-                kwargs['extra'] = {'context': context}
+            if "extra" not in kwargs:
+                kwargs["extra"] = {"context": context}
             else:
-                kwargs['extra']['context'] = context
+                kwargs["extra"]["context"] = context
 
         # Call the original _log method
         return original_log(self, level, from_decorator, options, message, args, kwargs)
@@ -157,6 +152,7 @@ def get_version() -> str:
     """
     try:
         from importlib.metadata import version
+
         return version("lokikit")
     except:
         return "unknown"
@@ -173,6 +169,7 @@ def get_logger():
 
 # Patch existing code that might use the standard logging module
 import logging
+
 
 class InterceptHandler(logging.Handler):
     """
@@ -195,9 +192,8 @@ class InterceptHandler(logging.Handler):
             frame = frame.f_back
             depth += 1
 
-        logger.opt(depth=depth, exception=record.exc_info).log(
-            level, record.getMessage()
-        )
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
 
 # Configure standard logging to use Loguru
 logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)

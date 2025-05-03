@@ -68,6 +68,59 @@ See `lokikit.example.yaml` for a complete configuration example.
 - `lokikit watch PATH` - Add a log path to monitor
 - `lokikit clean` - Remove all downloaded files and configurations
 
+## Development
+
+### Setup Development Environment
+
+1. Clone the repository:
+   ```sh
+   git clone https://github.com/iamgp/lokikit.git
+   cd lokikit
+   ```
+
+2. Create and activate a virtual environment:
+   ```sh
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+
+3. Install development dependencies:
+   ```sh
+   pip install -e ".[dev]"
+   ```
+
+4. Set up pre-commit hooks:
+   ```sh
+   pip install pre-commit
+   pre-commit install
+   ```
+
+### Development Tools
+
+- **Linting**: We use [ruff](https://github.com/astral-sh/ruff) for linting and formatting
+  ```sh
+  ruff check .       # Run linting
+  ruff format .      # Format code
+  ```
+
+- **Type checking**: We use [BasedPyright](https://github.com/ananis25/basedpyright) for type checking
+  ```sh
+  basedpyright       # Run type checking
+  ```
+
+- **Testing**: We use pytest for testing
+  ```sh
+  pytest             # Run tests
+  pytest --cov=lokikit tests/  # Run tests with coverage
+  ```
+
+### CI/CD
+
+The project uses GitHub Actions for:
+- Running tests on multiple Python versions
+- Linting and type checking
+- Publishing to PyPI on release
+
 ## Disclaimer
 
 This project is not affiliated with or endorsed by Grafana Labs. Loki is a trademark of Grafana Labs.
