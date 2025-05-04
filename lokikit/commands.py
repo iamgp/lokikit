@@ -661,6 +661,7 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         max_files: Maximum number of log files to sample
         max_lines: Maximum number of lines to sample per file
     """
+    print(f"Starting log parse command on directory: {directory}")
     base_dir = ctx.obj["BASE_DIR"]
     logger = get_logger()
     console = Console()
@@ -672,18 +673,15 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         return
 
     # Check if Grafana is running
-    services_status = check_services_running(base_dir)
+    pids = read_pid_file(base_dir)
     grafana_running = False
     promtail_running = False
 
-    if isinstance(services_status, dict):
-        grafana_info = services_status.get("grafana", {})
-        if isinstance(grafana_info, dict):
-            grafana_running = grafana_info.get("running", False)
-
-        promtail_info = services_status.get("promtail", {})
-        if isinstance(promtail_info, dict):
-            promtail_running = promtail_info.get("running", False)
+    if pids:
+        services_status = check_services_running(pids)
+        if services_status:
+            grafana_running = True
+            promtail_running = True
 
     if not grafana_running:
         logger.warning("Grafana is not running. Dashboard will be saved but not loaded.")
