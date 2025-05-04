@@ -679,7 +679,7 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
 
     if pids:
         services_status = check_services_running(pids)
-        if services_status:
+        if isinstance(services_status, dict):
             grafana_running = services_status.get("grafana", False)
             promtail_running = services_status.get("promtail", False)
 
