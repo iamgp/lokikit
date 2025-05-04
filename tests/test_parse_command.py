@@ -6,8 +6,11 @@ import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest
+from click.testing import CliRunner
 
+from lokikit.cli import cli
 from lokikit.commands import parse_command
+from lokikit.utils.dashboard_generator import create_dashboard, save_dashboard
 
 
 @pytest.fixture
@@ -284,3 +287,163 @@ def test_parse_command_json_fields_detection(
     # Verify restart instructions were shown for non-running services
     messages = [args[0] for args, _ in mock_console.print.call_args_list]
     assert any("Start Lokikit services" in str(m) for m in messages)
+
+
+@pytest.fixture
+def sample_log_dir():
+    """Create a temporary directory with sample log files."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Create a sample JSON log file
+        log_file = os.path.join(tmp_dir, "test.log")
+        with open(log_file, "w") as f:
+            f.write('{"timestamp": "2023-01-01T00:00:00Z", "level": "info", "message": "Test log", "code": 200}\n')
+            f.write('{"timestamp": "2023-01-01T00:01:00Z", "level": "error", "message": "Error log", "code": 500}\n')
+            f.write('{"timestamp": "2023-01-01T00:02:00Z", "level": "warn", "message": "Warning log", "code": 400}\n')
+
+        yield tmp_dir
+
+
+def test_create_dashboard():
+    """Test creating a dashboard JSON."""
+    dashboard = create_dashboard(
+        dashboard_name="Test Dashboard",
+        fields=["timestamp", "level", "message", "code"],
+        job_name="test_job",
+        labels={"env": "test", "component": "api"},
+        field_types={"timestamp": {"string"}, "level": {"string"}, "message": {"string"}, "code": {"int"}},
+    )
+
+    # Verify basic dashboard properties
+    assert dashboard["title"] == "Test Dashboard"
+    assert "lokikit" in dashboard["tags"]
+    assert "Test Dashboard" in dashboard["title"]
+
+    # Verify panels are created
+    panels = dashboard["panels"]
+    assert len(panels) > 0
+
+    # Verify there are panels for our different field types
+    panel_titles = [panel["title"] for panel in panels]
+    assert "Log Browser" in panel_titles
+    assert "Structured Fields" in panel_titles
+    assert "code over time" in panel_titles  # Numeric field should get a timeseries
+    assert any("distribution" in title for title in panel_titles)  # String field should get a distribution panel
+
+
+@patch("lokikit.commands.Confirm.ask")
+@patch("lokikit.commands.Prompt.ask")
+@patch("lokikit.commands.read_pid_file")
+@patch("lokikit.commands.check_services_running")
+@patch("lokikit.commands.create_dashboard")
+@patch("lokikit.commands.save_dashboard")
+@patch("lokikit.commands.watch_command")
+def test_parse_command(
+    mock_watch,
+    mock_save,
+    mock_create,
+    mock_check_services,
+    mock_read_pid,
+    mock_prompt,
+    mock_confirm,
+    sample_log_dir,
+):
+    """Test the parse command functionality with mocks."""
+    # Setup mocks
+    ctx = MagicMock()
+    ctx.obj = {"BASE_DIR": tempfile.gettempdir(), "HOST": "localhost", "GRAFANA_PORT": 3000}
+
+    mock_read_pid.return_value = {"grafana": 1234, "loki": 5678, "promtail": 9012}
+    mock_check_services.return_value = {"grafana": True, "loki": True, "promtail": True}
+    mock_prompt.side_effect = ["test_job", "all", "Test Dashboard"]
+    mock_confirm.return_value = False  # No custom labels
+    mock_create.return_value = {"uid": "test-uid", "title": "Test Dashboard"}
+    mock_save.return_value = os.path.join(tempfile.gettempdir(), "dashboards", "test_dashboard.json")
+
+    # Run the command
+    parse_command(ctx, sample_log_dir, None, 5, 100)
+
+    # Verify interactions
+    mock_create.assert_called_once()
+    mock_save.assert_called_once()
+    mock_watch.assert_called_once()
+
+    # Check arguments
+    create_args = mock_create.call_args[1]
+    assert create_args["dashboard_name"] == "Test Dashboard"
+    assert "timestamp" in create_args["fields"]
+    assert "level" in create_args["fields"]
+    assert "message" in create_args["fields"]
+    assert "code" in create_args["fields"]
+    assert create_args["job_name"] == "test_job"
+
+
+@patch("lokikit.commands.check_services_running")
+@patch("lokikit.commands.create_dashboard")
+@patch("lokikit.commands.save_dashboard")
+@patch("lokikit.commands.watch_command")
+def test_cli_parse_command(
+    mock_watch,
+    mock_save,
+    mock_create,
+    mock_check_services,
+    sample_log_dir,
+):
+    """Test the CLI parse command."""
+    runner = CliRunner()
+
+    # Mock services running check
+    mock_check_services.return_value = {"grafana": True, "loki": True, "promtail": True}
+
+    # Mock dashboard creation
+    mock_create.return_value = {"uid": "test-uid", "title": "Test Dashboard"}
+    mock_save.return_value = os.path.join(tempfile.gettempdir(), "dashboards", "test_dashboard.json")
+
+    with patch("lokikit.commands.Prompt.ask") as mock_prompt:
+        mock_prompt.side_effect = ["test_job", "all", "Test Dashboard"]
+
+        with patch("lokikit.commands.Confirm.ask") as mock_confirm:
+            mock_confirm.return_value = False  # No custom labels
+
+            # Run the command
+            result = runner.invoke(cli, ["--verbose", "parse", sample_log_dir, "--dashboard-name", "Test Dashboard"])
+
+    # Assert successful command execution
+    assert result.exit_code == 0
+
+    # Verify dashboard creation was called
+    mock_create.assert_called_once()
+    mock_save.assert_called_once()
+
+    # Verify prompt interactions
+    assert mock_prompt.call_count > 0
+    assert mock_confirm.call_count > 0
+
+
+def test_save_dashboard():
+    """Test saving a dashboard."""
+    # Create a temporary directory for testing
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Create a test dashboard
+        dashboard = {
+            "uid": "test-uid",
+            "title": "Test Dashboard",
+            "panels": [{"id": 1, "title": "Test Panel"}],
+        }
+
+        # Save the dashboard
+        with patch("lokikit.utils.dashboard_generator.get_binaries") as mock_get_binaries:
+            # Mock the binaries to avoid actual Grafana detection
+            mock_get_binaries.return_value = None
+
+            dashboard_path = save_dashboard(dashboard, tmp_dir, "Test Dashboard")
+
+        # Verify the dashboard was saved
+        assert os.path.exists(dashboard_path)
+
+        # Check dashboard content
+        with open(dashboard_path) as f:
+            saved_dashboard = json.load(f)
+            assert saved_dashboard["uid"] == "test-uid"
+            assert saved_dashboard["title"] == "Test Dashboard"
+            assert len(saved_dashboard["panels"]) == 1
+            assert saved_dashboard["panels"][0]["title"] == "Test Panel"

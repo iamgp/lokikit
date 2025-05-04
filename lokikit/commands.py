@@ -680,8 +680,8 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
     if pids:
         services_status = check_services_running(pids)
         if services_status:
-            grafana_running = True
-            promtail_running = True
+            grafana_running = services_status.get("grafana", False)
+            promtail_running = services_status.get("promtail", False)
 
     if not grafana_running:
         logger.warning("Grafana is not running. Dashboard will be saved but not loaded.")
@@ -867,6 +867,7 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
             fields=selected_fields,
             job_name=job_name,
             labels=labels,
+            field_types=json_fields,
         )
 
         # Save the dashboard
