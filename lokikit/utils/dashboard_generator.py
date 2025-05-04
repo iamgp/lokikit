@@ -77,8 +77,8 @@ def create_dashboard(
         for k, v in labels.items():
             dashboard["description"] += f"- {k}: {v}\n"
 
-    # Build the base Loki query
-    base_query = build_loki_query(job_name, labels, fields)
+    # Build the base Loki query (without fields for the logs panel)
+    base_query = build_loki_query(job_name, labels, None)
 
     # Add a header row with description/metrics
     header_row_height = 3
