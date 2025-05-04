@@ -1,13 +1,20 @@
 """Command implementations for lokikit CLI."""
 
+import glob
+import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
 import time
+from typing import Any
 
 import yaml
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Confirm, Prompt
+from rich.table import Table
 
 from lokikit.config import (
     LOKI_CONFIG_TEMPLATE,
@@ -31,6 +38,7 @@ from lokikit.process import (
     wait_for_services,
     write_pid_file,
 )
+from lokikit.utils.dashboard_generator import create_dashboard, save_dashboard
 
 
 def setup_command(ctx):
@@ -641,3 +649,263 @@ def force_quit_command(ctx):
     # Step 3: Create a fresh state
     logger.info("All lokikit processes have been terminated")
     logger.info("You can now start services with a clean state using: lokikit start")
+
+
+def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_files: int = 5, max_lines: int = 100):
+    """Parse logs and interactively create Grafana dashboards.
+
+    Args:
+        ctx: Click context
+        directory: Directory containing log files to parse
+        dashboard_name: Name for the generated dashboard
+        max_files: Maximum number of log files to sample
+        max_lines: Maximum number of lines to sample per file
+    """
+    base_dir = ctx.obj["BASE_DIR"]
+    logger = get_logger()
+    console = Console()
+
+    # Check if directory exists
+    if not os.path.isdir(directory):
+        logger.error(f"Directory does not exist: {directory}")
+        console.print(f"[bold red]Directory does not exist:[/] {directory}")
+        return
+
+    # Check if Grafana is running
+    services_status = check_services_running(base_dir)
+    grafana_running = False
+    promtail_running = False
+
+    if isinstance(services_status, dict):
+        grafana_info = services_status.get("grafana", {})
+        if isinstance(grafana_info, dict):
+            grafana_running = grafana_info.get("running", False)
+
+        promtail_info = services_status.get("promtail", {})
+        if isinstance(promtail_info, dict):
+            promtail_running = promtail_info.get("running", False)
+
+    if not grafana_running:
+        logger.warning("Grafana is not running. Dashboard will be saved but not loaded.")
+        console.print("[bold yellow]Warning:[/] Grafana is not running. Dashboard will be saved but not loaded.")
+
+    # Find all log files in the directory
+    console.print(f"[bold]Searching for log files in:[/] {directory}")
+    log_files = []
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Scanning log files..."),
+        console=console,
+    ) as progress:
+        progress.add_task("scan", total=None)
+        for ext in ["log", "json", "txt"]:
+            log_files.extend(glob.glob(f"{directory}/**/*.{ext}", recursive=True))
+
+        # Limit the number of files
+        log_files = log_files[:max_files]
+
+    if not log_files:
+        logger.error(f"No log files found in: {directory}")
+        console.print(f"[bold red]No log files found in:[/] {directory}")
+        return
+
+    console.print(f"[green]Found {len(log_files)} log files[/]")
+
+    # Sample log files to extract potential fields
+    console.print("[bold]Analyzing log contents...[/]")
+
+    # Dictionary to store potential JSON fields and their types
+    json_fields: dict[str, set[str]] = {}
+    sample_logs: list[dict[str, Any]] = []
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Parsing logs..."),
+        console=console,
+    ) as progress:
+        task = progress.add_task("parse", total=len(log_files))
+
+        for file_path in log_files:
+            progress.update(task, description=f"[bold blue]Parsing[/] {os.path.basename(file_path)}")
+
+            try:
+                with open(file_path) as f:
+                    for i, line in enumerate(f):
+                        if i >= max_lines:
+                            break
+
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        # Try to parse as JSON
+                        try:
+                            log_data = json.loads(line)
+                            if isinstance(log_data, dict):
+                                # Add to sample logs
+                                if len(sample_logs) < 5:
+                                    sample_logs.append(log_data)
+
+                                # Extract fields and types
+                                for key, value in log_data.items():
+                                    if key not in json_fields:
+                                        json_fields[key] = set()
+
+                                    value_type = type(value).__name__
+                                    json_fields[key].add(value_type)
+                        except json.JSONDecodeError:
+                            # Not JSON, skip
+                            pass
+            except Exception as e:
+                logger.warning(f"Error reading file {file_path}: {e}")
+
+            progress.update(task, advance=1)
+
+    if not json_fields:
+        logger.warning("No JSON logs found in the sampled files.")
+        console.print("[bold yellow]Warning:[/] No JSON logs found in the sampled files.")
+
+        if not Confirm.ask("Continue with creating a basic log dashboard?"):
+            console.print("[yellow]Operation cancelled.[/]")
+            return
+
+    # Display discovered fields
+    console.print("[bold]Discovered JSON fields:[/]")
+
+    field_table = Table(show_header=True, header_style="bold blue")
+    field_table.add_column("Field Name")
+    field_table.add_column("Types")
+    field_table.add_column("Sample Values")
+
+    for field_name, types in sorted(json_fields.items()):
+        # Get sample values for this field
+        sample_values = []
+        for sample in sample_logs:
+            if field_name in sample:
+                sample_value = str(sample[field_name])
+                # Truncate long values
+                if len(sample_value) > 50:
+                    sample_value = sample_value[:47] + "..."
+                sample_values.append(sample_value)
+
+        field_table.add_row(
+            field_name,
+            ", ".join(types),
+            "\n".join(sample_values[:2]) if sample_values else "",
+        )
+
+    console.print(field_table)
+
+    # Interactive field selection
+    selected_fields = []
+
+    if json_fields:
+        console.print("[bold]Select fields to include in the dashboard:[/]")
+        console.print("Enter field names separated by commas, or 'all' for all fields")
+
+        field_input = Prompt.ask(
+            "Fields to include",
+            default="all",
+        )
+
+        if field_input.lower().strip() == "all":
+            selected_fields = list(json_fields.keys())
+        else:
+            selected_fields = [field.strip() for field in field_input.split(",") if field.strip()]
+
+            # Validate fields
+            invalid_fields = [field for field in selected_fields if field not in json_fields]
+            if invalid_fields:
+                console.print(f"[yellow]Warning: The following fields were not found: {', '.join(invalid_fields)}[/]")
+                selected_fields = [field for field in selected_fields if field in json_fields]
+
+    # Determine job name (from promtail config)
+    job_name = None
+    labels = {}
+
+    # Get base directory name as default job name
+    default_job_name = os.path.basename(os.path.abspath(directory))
+
+    # Ask for job name
+    job_name = Prompt.ask(
+        "Job name for these logs",
+        default=default_job_name,
+    )
+
+    # Ask for custom labels
+    add_labels = Confirm.ask("Add custom labels for filtering?", default=False)
+    if add_labels:
+        while True:
+            label_key = Prompt.ask("Label key (or empty to finish)")
+            if not label_key:
+                break
+
+            label_value = Prompt.ask(f"Value for '{label_key}'")
+            labels[label_key] = label_value
+
+    # Ask for dashboard name if not provided
+    if not dashboard_name:
+        dashboard_name = Prompt.ask(
+            "Dashboard name", default=f"{job_name.capitalize()} Logs" if job_name else "Log Analysis Dashboard"
+        )
+
+    # Ensure dashboard_name is a string for type checking
+    dashboard_name = str(dashboard_name)
+
+    # Generate dashboard
+    console.print("[bold]Generating dashboard...[/]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Creating dashboard..."),
+        console=console,
+    ) as progress:
+        task = progress.add_task("create", total=None)
+
+        # Create the dashboard
+        dashboard = create_dashboard(
+            dashboard_name=dashboard_name,
+            fields=selected_fields,
+            job_name=job_name,
+            labels=labels,
+        )
+
+        # Save the dashboard
+        dashboard_path = save_dashboard(dashboard, base_dir, dashboard_name)
+
+    # Add the log path to promtail configuration if not already watching
+    console.print("[bold]Updating Promtail configuration...[/]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Updating Promtail config..."),
+        console=console,
+    ) as progress:
+        task = progress.add_task("update", total=None)
+
+        # Get all files in directory with wildcards
+        log_path = os.path.join(directory, "**", "*.log")
+
+        # Create label list for watch command format
+        label_list = tuple(f"{k}={v}" for k, v in labels.items())
+
+        # Update promtail config
+        watch_command(ctx, log_path, job_name, label_list)
+
+    console.print(f"[bold green]Dashboard created:[/] {dashboard_path}")
+    console.print(f"[bold]Job name:[/] {job_name}")
+
+    # Display restart instructions if Grafana is running
+    if grafana_running:
+        grafana_url = f"http://{ctx.obj['HOST']}:{ctx.obj['GRAFANA_PORT']}"
+        console.print(f"\nDashboard will be available at: [bold blue]{grafana_url}/dashboards[/]")
+
+        if promtail_running:
+            console.print(
+                "\n[bold yellow]Note:[/] You may need to restart Promtail to pick up the configuration changes:"
+            )
+            console.print("  [bold]lokikit stop --force[/] and [bold]lokikit start[/]")
+    else:
+        console.print("\n[bold yellow]Note:[/] Start Lokikit services to use the dashboard:")
+        console.print("  [bold]lokikit start[/]")

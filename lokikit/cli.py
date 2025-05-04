@@ -5,6 +5,7 @@ import click
 from lokikit.commands import (
     clean_command,
     force_quit_command,
+    parse_command,
     setup_command,
     start_command,
     status_command,
@@ -173,6 +174,20 @@ def force_quit(ctx):
     This resolves issues with stale processes and PID file mismatches.
     """
     force_quit_command(ctx)
+
+
+@cli.command()
+@click.argument("directory", type=click.Path(exists=True, file_okay=False, dir_okay=True))
+@click.option("--dashboard-name", help="Name for the generated Grafana dashboard.")
+@click.option("--max-files", type=int, default=5, help="Maximum number of log files to sample.")
+@click.option("--max-lines", type=int, default=100, help="Maximum number of lines to sample per file.")
+@click.pass_context
+def parse(ctx, directory, dashboard_name, max_files, max_lines):
+    """Parse logs and interactively create Grafana dashboards.
+
+    DIRECTORY is the directory containing log files to parse.
+    """
+    parse_command(ctx, directory, dashboard_name, max_files, max_lines)
 
 
 if __name__ == "__main__":
