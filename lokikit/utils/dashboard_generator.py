@@ -78,7 +78,7 @@ def create_dashboard(
             dashboard["description"] += f"- {k}: {v}\n"
 
     # Build the base Loki query
-    base_query = build_loki_query(job_name, labels)
+    base_query = build_loki_query(job_name, labels, fields)
 
     # Add a header row with description/metrics
     header_row_height = 3
@@ -314,17 +314,17 @@ def build_loki_query(
     labels: dict[str, str] | None = None,
     fields: list[str] | None = None,
 ) -> str:
-    """Build a Loki query string with the given parameters.
+    """
+    Build a Loki query string from job name, labels, and fields.
 
     Args:
-        job_name: Optional job name for filtering logs
-        labels: Optional additional labels for filtering logs
-        fields: Optional list of fields to extract
+        job_name (str, optional): Job name for the selector
+        labels (dict, optional): Additional labels for the selector
+        fields (list, optional): Fields to extract from the logs
 
     Returns:
-        Loki query string
+        str: The Loki query string
     """
-    # Start with base selector
     if job_name or labels:
         query_parts = ["{"]
         selectors = []
@@ -343,14 +343,19 @@ def build_loki_query(
         if fields and len(fields) > 0:
             query_parts.append(" | json")
 
-            # Add line format for selected fields if requested
-            if fields and len(fields) > 0:
-                extracted_fields = ", ".join([f"extracted.{field}" for field in fields])
-                query_parts.append(f' | line_format "{{ {extracted_fields} }}"')
+        # Add line format for selected fields if requested
+        if fields and len(fields) > 0:
+            extracted_fields = ", ".join([f"extracted.{field}" for field in fields])
+            query_parts.append(f' | line_format "{{ {extracted_fields} }}"')
 
         return "".join(query_parts)
     else:
-        return "{}"
+        base = "{}"
+        if fields:
+            base += " | json"
+            extracted_fields = " ".join([f"{{{{.extracted.{f}}}}}" for f in fields])
+            base += f' | line_format "{extracted_fields}"'
+        return base
 
 
 def save_dashboard(dashboard: dict, base_dir: str, dashboard_name: str) -> str:
