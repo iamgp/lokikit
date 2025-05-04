@@ -222,13 +222,20 @@ def test_start_command_with_options(mock_start_command, cli_runner):
 @patch("lokikit.cli.stop_command")
 def test_stop_command_defaults(mock_stop_command, cli_runner):
     """Test the stop subcommand with default options."""
+    # Add a return value to avoid potential issues
+    mock_stop_command.return_value = None
+
     result = cli_runner.invoke(cli, ["stop"])
 
     assert result.exit_code == 0
     mock_stop_command.assert_called_once()
-    # Verify default parameters
+
+    # CLI passes args positionally
     args, _ = mock_stop_command.call_args
-    assert not args.get("force", False)
+    args[0]  # First arg is the context
+    force = args[1]  # Second arg is force flag
+
+    assert force is False
 
 
 @patch("lokikit.cli.stop_command")

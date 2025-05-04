@@ -682,6 +682,10 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         if isinstance(services_status, dict):
             grafana_running = services_status.get("grafana", False)
             promtail_running = services_status.get("promtail", False)
+        else:
+            # When check_services_running returns a boolean
+            grafana_running = services_status
+            promtail_running = services_status
 
     if not grafana_running:
         logger.warning("Grafana is not running. Dashboard will be saved but not loaded.")

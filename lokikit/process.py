@@ -46,16 +46,23 @@ def read_pid_file(base_dir):
 
 
 def check_services_running(pids):
-    """Check if services with the given PIDs are running."""
+    """Check if services with the given PIDs are running.
+
+    Returns:
+        dict: A dictionary mapping service names to their running status (True/False)
+        bool: False if no PIDs are provided
+    """
     if not pids:
         return False
 
-    all_running = True
+    service_statuses = {}
     # First try checking by PID
     for name, pid in pids.items():
+        service_running = False
         try:
             # Sending signal 0 checks if process exists
             os.kill(pid, 0)
+            service_running = True
         except OSError:
             # Process with that PID doesn't exist, try checking by pattern
             pattern = ""
@@ -73,14 +80,14 @@ def check_services_running(pids):
                     if result.returncode == 0 and result.stdout.strip():
                         # Found a match, pick the first one
                         pids[name] = int(result.stdout.split()[0])
-                        continue
+                        service_running = True
                 except (subprocess.SubprocessError, ValueError, IndexError):
                     pass
 
-            # Neither PID nor pattern search found a match
-            all_running = False
+        service_statuses[name] = service_running
 
-    return all_running
+    # Return the dictionary with individual service statuses
+    return service_statuses
 
 
 def service_is_accessible(host, port, timeout=0.5):

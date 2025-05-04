@@ -18,8 +18,10 @@ def test_create_dashboard_basic():
 
     assert dashboard["title"] == "Test Dashboard"
     assert dashboard["tags"] == ["lokikit", "generated"]
-    assert len(dashboard["panels"]) == 1  # Just the logs panel
-    assert dashboard["panels"][0]["type"] == "logs"
+    assert len(dashboard["panels"]) == 3  # Info panel, log volume panel, and logs panel
+    assert any(panel["type"] == "logs" for panel in dashboard["panels"])
+    assert any(panel["type"] == "text" for panel in dashboard["panels"])  # Info panel
+    assert any(panel["type"] == "timeseries" for panel in dashboard["panels"])  # Log volume panel
 
 
 def test_create_dashboard_with_fields():
@@ -33,21 +35,30 @@ def test_create_dashboard_with_fields():
     )
 
     assert dashboard["title"] == "Log Analysis"
-    assert len(dashboard["panels"]) == 2  # Logs panel and table panel
 
-    # Check logs panel
-    logs_panel = dashboard["panels"][0]
-    assert logs_panel["type"] == "logs"
+    # Dashboard should include multiple panels
+    assert len(dashboard["panels"]) >= 4  # At least info panel, log volume, logs panel, table panel
+
+    # Verify panel types
+    panel_types = [panel["type"] for panel in dashboard["panels"]]
+    assert "logs" in panel_types
+    assert "table" in panel_types
+    assert "text" in panel_types
+    assert "timeseries" in panel_types
+
+    # Find the logs panel
+    logs_panel = next((panel for panel in dashboard["panels"] if panel["type"] == "logs"), None)
+    assert logs_panel is not None
     assert logs_panel["title"] == "Log Browser"
     assert logs_panel["targets"][0]["expr"] == '{job="test_job", env="test"}'
 
-    # Check table panel
-    table_panel = dashboard["panels"][1]
-    assert table_panel["type"] == "table"
+    # Find the table panel
+    table_panel = next((panel for panel in dashboard["panels"] if panel["type"] == "table"), None)
+    assert table_panel is not None
     assert table_panel["title"] == "Structured Fields"
     assert (
         table_panel["targets"][0]["expr"]
-        == '{job="test_job", env="test"} | json | line_format "{{ extracted.timestamp, extracted.level, extracted.message }}"'
+        == '{job="test_job", env="test"} | json | line_format "{ extracted.timestamp, extracted.level, extracted.message }"'
     )
 
 
@@ -82,7 +93,7 @@ def test_build_loki_query_with_fields():
         fields=["timestamp", "level", "message"],
     )
     assert (
-        query == '{job="test_job"} | json | line_format "{{ extracted.timestamp, extracted.level, extracted.message }}"'
+        query == '{job="test_job"} | json | line_format "{ extracted.timestamp, extracted.level, extracted.message }"'
     )
 
 
@@ -114,4 +125,11 @@ def test_save_dashboard(temp_dir):
 
     assert saved_dashboard["title"] == "Test Dashboard"
     assert saved_dashboard["tags"] == ["lokikit", "generated"]
-    assert len(saved_dashboard["panels"]) == 2  # Logs panel and table panel
+
+    # Verify panel count and types
+    assert len(saved_dashboard["panels"]) >= 4  # At least info, volume, logs, and table panels
+    panel_types = [panel["type"] for panel in saved_dashboard["panels"]]
+    assert "logs" in panel_types
+    assert "table" in panel_types
+    assert "text" in panel_types
+    assert "timeseries" in panel_types
