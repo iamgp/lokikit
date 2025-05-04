@@ -45,7 +45,7 @@ def mock_logger():
 @patch("subprocess.Popen")
 def test_start_process(mock_popen, temp_setup, mock_logger):
     """Test starting a process."""
-    temp_dir, log_file = temp_setup
+    _temp_dir, log_file = temp_setup
     mock_process = MagicMock()
     mock_popen.return_value = mock_process
 

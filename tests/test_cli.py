@@ -45,9 +45,7 @@ def cli_runner():
 @patch("lokikit.cli.setup_logging")
 @patch("lokikit.cli.load_config_file")
 @patch("lokikit.cli.merge_config")
-def test_cli_base_with_defaults(
-    mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env
-):
+def test_cli_base_with_defaults(mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env):
     """Test CLI with default options."""
     # Mock return values
     mock_logger = MagicMock()
@@ -80,9 +78,7 @@ def test_cli_base_with_defaults(
 @patch("lokikit.cli.setup_logging")
 @patch("lokikit.cli.load_config_file")
 @patch("lokikit.cli.merge_config")
-def test_cli_base_with_config_file(
-    mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env
-):
+def test_cli_base_with_config_file(mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env):
     """Test CLI with config file option."""
     # Mock return values
     mock_logger = MagicMock()
@@ -114,9 +110,7 @@ def test_cli_base_with_config_file(
 @patch("lokikit.cli.setup_logging")
 @patch("lokikit.cli.load_config_file")
 @patch("lokikit.cli.merge_config")
-def test_cli_base_with_cli_options(
-    mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env
-):
+def test_cli_base_with_cli_options(mock_merge_config, mock_load_config, mock_setup_logging, cli_test_env):
     """Test CLI with command line options."""
     # Mock return values
     mock_logger = MagicMock()
@@ -192,7 +186,7 @@ def test_start_command_defaults(mock_start_command, cli_runner):
     mock_start_command.assert_called_once()
 
     # The CLI passes arguments positionally, not as kwargs
-    args, kwargs = mock_start_command.call_args
+    args, _ = mock_start_command.call_args
     args[0]  # First arg is the context
     background = args[1]  # Second arg is background flag
     force = args[2]  # Third arg is force flag
@@ -214,7 +208,7 @@ def test_start_command_with_options(mock_start_command, cli_runner):
     mock_start_command.assert_called_once()
 
     # The CLI passes arguments positionally, not as kwargs
-    args, kwargs = mock_start_command.call_args
+    args, _ = mock_start_command.call_args
     args[0]  # First arg is the context
     background = args[1]  # Second arg is background flag
     force = args[2]  # Third arg is force flag
@@ -233,8 +227,8 @@ def test_stop_command_defaults(mock_stop_command, cli_runner):
     assert result.exit_code == 0
     mock_stop_command.assert_called_once()
     # Verify default parameters
-    args, kwargs = mock_stop_command.call_args
-    assert not kwargs.get("force", False)
+    args, _ = mock_stop_command.call_args
+    assert not args.get("force", False)
 
 
 @patch("lokikit.cli.stop_command")
@@ -249,7 +243,7 @@ def test_stop_command_with_force(mock_stop_command, cli_runner):
     mock_stop_command.assert_called_once()
 
     # CLI passes args positionally
-    args, kwargs = mock_stop_command.call_args
+    args, _ = mock_stop_command.call_args
     args[0]  # First arg is the context
     force = args[1]  # Second arg is force flag
 
@@ -287,7 +281,7 @@ def test_watch_command(mock_watch_command, cli_runner):
     mock_watch_command.assert_called_once()
 
     # CLI passes args positionally
-    args, kwargs = mock_watch_command.call_args
+    args, _ = mock_watch_command.call_args
     args[0]  # First arg is the context
     path = args[1]  # Second arg is path
     job = args[2]  # Third arg is job
@@ -322,7 +316,7 @@ def test_watch_command_with_options(mock_watch_command, cli_runner):
     mock_watch_command.assert_called_once()
 
     # CLI passes args positionally
-    args, kwargs = mock_watch_command.call_args
+    args, _ = mock_watch_command.call_args
     args[0]  # First arg is the context
     path = args[1]  # Second arg is path
     job = args[2]  # Third arg is job

@@ -7,7 +7,7 @@ import socket
 import subprocess
 import time
 
-from lokikit.logging import get_logger
+from lokikit.logger import get_logger
 
 
 def start_process(cmd, log_file):
@@ -69,9 +69,7 @@ def check_services_running(pids):
             if pattern:
                 # Try to find by pattern
                 try:
-                    result = subprocess.run(
-                        ["pgrep", "-f", pattern], capture_output=True, text=True, check=False
-                    )
+                    result = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True, check=False)
                     if result.returncode == 0 and result.stdout.strip():
                         # Found a match, pick the first one
                         pids[name] = int(result.stdout.split()[0])
@@ -189,9 +187,7 @@ def stop_services(pids, force=False):
                 try:
                     os.kill(pid, 0)
                     # If we get here, process is still running
-                    logger.warning(
-                        f"Service {name} (PID: {pid}) did not terminate with SIGTERM, trying SIGKILL..."
-                    )
+                    logger.warning(f"Service {name} (PID: {pid}) did not terminate with SIGTERM, trying SIGKILL...")
                     os.kill(pid, signal.SIGKILL)
                 except OSError:
                     # Process is gone after SIGTERM

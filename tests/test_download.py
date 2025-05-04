@@ -254,8 +254,8 @@ def nested_temp_dir():
     for root, dirs, files in os.walk(dir_path, topdown=False):
         for file in files:
             os.remove(os.path.join(root, file))
-        for dir in dirs:
-            os.rmdir(os.path.join(root, dir))
+        for directory in dirs:
+            os.rmdir(os.path.join(root, directory))
     os.rmdir(dir_path)
 
 
@@ -263,9 +263,7 @@ def nested_temp_dir():
 @patch("os.path.isfile")
 @patch("os.access")
 @patch("builtins.print")
-def test_find_grafana_binary_by_glob(
-    mock_print, mock_access, mock_isfile, mock_glob, nested_temp_dir
-):
+def test_find_grafana_binary_by_glob(mock_print, mock_access, mock_isfile, mock_glob, nested_temp_dir):
     """Test finding Grafana binary using glob pattern."""
     binary_name = "grafana-server"
     grafana_version = "9.0.0"
@@ -289,9 +287,7 @@ def test_find_grafana_binary_by_glob(
 @patch("os.path.isfile")
 @patch("os.access")
 @patch("builtins.print")
-def test_find_grafana_binary_by_direct_path(
-    mock_print, mock_access, mock_isfile, mock_glob, nested_temp_dir
-):
+def test_find_grafana_binary_by_direct_path(mock_print, mock_access, mock_isfile, mock_glob, nested_temp_dir):
     """Test finding Grafana binary using direct path."""
     binary_name = "grafana-server"
     grafana_version = "9.0.0"
@@ -353,9 +349,7 @@ def test_find_grafana_binary_by_find_command(
 @patch("os.access")
 @patch("subprocess.run")
 @patch("builtins.print")
-def test_find_grafana_binary_not_found(
-    mock_print, mock_run, mock_access, mock_isfile, mock_glob, nested_temp_dir
-):
+def test_find_grafana_binary_not_found(mock_print, mock_run, mock_access, mock_isfile, mock_glob, nested_temp_dir):
     """Test when Grafana binary cannot be found."""
     binary_name = "grafana-server"
     grafana_version = "9.0.0"

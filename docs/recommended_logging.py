@@ -11,7 +11,7 @@ import os
 import sys
 import traceback
 from datetime import datetime
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 
 class StructuredJsonFormatter(logging.Formatter):
@@ -20,7 +20,7 @@ class StructuredJsonFormatter(logging.Formatter):
     This format works well with Loki's LogQL for efficient querying and filtering.
     """
 
-    def __init__(self, service_name: str, additional_fields: Optional[Dict[str, Any]] = None):
+    def __init__(self, service_name: str, additional_fields: dict[str, Any] | None = None):
         """Initialize the formatter with service info and additional fields.
 
         Args:
@@ -112,7 +112,7 @@ class ContextAdapter(logging.LoggerAdapter):
     Provides a way to add structured context data to log entries.
     """
 
-    def __init__(self, logger: logging.Logger, context: Optional[Dict[str, Any]] = None):
+    def __init__(self, logger: logging.Logger, context: dict[str, Any] | None = None):
         """Initialize the adapter with a logger and optional context.
 
         Args:
@@ -121,7 +121,7 @@ class ContextAdapter(logging.LoggerAdapter):
         """
         super().__init__(logger, context or {})
 
-    def process(self, msg: str, kwargs: Dict[str, Any]) -> tuple:
+    def process(self, msg: str, kwargs: dict[str, Any]) -> tuple:
         """Process the log message to add context information.
 
         Args:
@@ -157,10 +157,10 @@ class ContextAdapter(logging.LoggerAdapter):
 
 def setup_structured_logging(
     service_name: str,
-    log_level: Union[int, str] = logging.INFO,
-    log_file: Optional[str] = None,
+    log_level: int | str = logging.INFO,
+    log_file: str | None = None,
     log_to_console: bool = True,
-    additional_fields: Optional[Dict[str, Any]] = None,
+    additional_fields: dict[str, Any] | None = None,
     root_logger: bool = True,
 ) -> ContextAdapter:
     """Configure structured JSON logging suitable for LokiKit.
@@ -208,7 +208,7 @@ def setup_structured_logging(
     return ContextAdapter(logger)
 
 
-def get_logger(module_name: str, context: Optional[Dict[str, Any]] = None) -> ContextAdapter:
+def get_logger(module_name: str, context: dict[str, Any] | None = None) -> ContextAdapter:
     """Get a logger with context for a specific module.
 
     Args:
@@ -249,9 +249,7 @@ if __name__ == "__main__":
     try:
         result = 1 / 0
     except Exception:
-        logger.exception(
-            "An error occurred during calculation", extra={"context": {"operation": "division"}}
-        )
+        logger.exception("An error occurred during calculation", extra={"context": {"operation": "division"}})
 
 # Sample LogQL queries for effective filtering in Grafana:
 #

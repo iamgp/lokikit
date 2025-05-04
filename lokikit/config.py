@@ -119,7 +119,7 @@ def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
     """Update promtail config to add a new log path."""
     # Import logger here to avoid circular imports
     try:
-        from lokikit.logging import get_logger
+        from lokikit.logger import get_logger
 
         logger = get_logger()
     except ImportError:
@@ -141,7 +141,9 @@ def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
 
     # Default values
     job_name = job_name or f"job_{hash(log_path) % 10000}"
-    labels = labels or {}
+    # Ensure labels is never None to satisfy the type checker
+    if labels is None:
+        labels = {}
 
     config_path = os.path.join(base_dir, "promtail-config.yaml")
 
@@ -181,9 +183,7 @@ def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
         # Create new job config
         new_job = {
             "job_name": job_name,
-            "static_configs": [
-                {"targets": ["localhost"], "labels": {"job": job_name, "__path__": abs_log_path}}
-            ],
+            "static_configs": [{"targets": ["localhost"], "labels": {"job": job_name, "__path__": abs_log_path}}],
         }
 
         # Add custom labels

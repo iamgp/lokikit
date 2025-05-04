@@ -175,11 +175,7 @@ def find_grafana_binary(base_dir, binary_name, grafana_version):
         )
         if result.returncode == 0 and result.stdout.strip():
             # Filter out packaging files
-            binaries = [
-                line
-                for line in result.stdout.strip().split("\n")
-                if line and "packaging" not in line
-            ]
+            binaries = [line for line in result.stdout.strip().split("\n") if line and "packaging" not in line]
             if binaries:
                 print(f"Found Grafana binary using find command: {binaries[0]}")
                 return binaries[0]
@@ -197,7 +193,5 @@ def get_binary_path(name, binaries, base_dir):
         return os.path.join(base_dir, binaries[name]["binary"])
     if name == "grafana":
         # For grafana, we need to find the binary after extraction
-        return find_grafana_binary(
-            base_dir, binaries["grafana"]["binary_name"], binaries["grafana"]["version"]
-        )
+        return find_grafana_binary(base_dir, binaries["grafana"]["binary_name"], binaries["grafana"]["version"])
     return None

@@ -1,18 +1,18 @@
 """Logging configuration for lokikit using Loguru."""
 
 import json
+import logging
 import os
 import sys
 import unittest.mock
 from datetime import datetime
+from typing import Any
 
 try:
     from loguru import logger
-except ImportError:
+except ImportError as e:
     # Add loguru to dependencies in setup.py
-    raise ImportError(
-        "Loguru is required for LokiKit logging. " "Please install it with: pip install loguru"
-    )
+    raise ImportError("Loguru is required for LokiKit logging. Please install it with: pip install loguru") from e
 
 
 class LokiKitJSONEncoder(json.JSONEncoder):
@@ -69,7 +69,7 @@ def setup_logging(base_dir, verbose=False):
     # Add JSON file sink with structured logging
     log_file = os.path.join(logs_dir, f"lokikit_{datetime.now().strftime('%Y%m%d')}.log")
 
-    def json_serializer(record):
+    def json_serializer(record: dict[str, Any]) -> str:
         """Serialize log record to JSON with LokiKit-specific structure."""
         # Standard log data
         log_data = {
@@ -103,7 +103,7 @@ def setup_logging(base_dir, verbose=False):
         log_file,
         level=log_level,
         format="{message}",  # Content will be replaced by serializer
-        serialize=json_serializer,
+        serialize=json_serializer,  # type: ignore # Loguru allows callable for serialize
         rotation="10 MB",
         retention="1 week",
     )
@@ -116,32 +116,40 @@ def setup_logging(base_dir, verbose=False):
 
 def _patch_logger_for_kwargs():
     """Patch the logger to support direct kwargs as context."""
-    # Get the original _log method
-    original_log = logger.__class__._log
+    # Use monkey patching at the module level instead of modifying the class
 
-    # Create a new _log method that handles kwargs as context
-    def new_log(self, level, from_decorator, options, message, args, kwargs):
-        # Extract explicit context if provided
-        context = kwargs.pop("context") if "context" in kwargs else {}
+    # Store the original logger.info, debug, warning, etc. methods
+    original_methods = {}
 
-        # Move all remaining kwargs into the context
-        for key, value in list(kwargs.items()):
-            if key not in ("exception", "record"):
-                context[key] = value
-                kwargs.pop(key)
+    for level in ["trace", "debug", "info", "success", "warning", "error", "critical"]:
+        original_methods[level] = getattr(logger, level)
 
-        # If we have context, add it to the extra dict
-        if context:
-            if "extra" not in kwargs:
-                kwargs["extra"] = {"context": context}
-            else:
-                kwargs["extra"]["context"] = context
+        # Create a new method that handles kwargs as context
+        def create_patched_method(original_method, level_name):
+            def patched_method(message, *args, **kwargs):
+                # Extract explicit context if provided
+                context = kwargs.pop("context", {})
 
-        # Call the original _log method
-        return original_log(self, level, from_decorator, options, message, args, kwargs)
+                # Move all remaining kwargs into the context
+                for key, value in list(kwargs.items()):
+                    if key not in ("exception", "record"):
+                        context[key] = value
+                        kwargs.pop(key)
 
-    # Replace the _log method
-    logger.__class__._log = new_log
+                # If we have context, add it to the extra dict
+                if context:
+                    if "extra" not in kwargs:
+                        kwargs["extra"] = {"context": context}
+                    else:
+                        kwargs["extra"]["context"] = context
+
+                # Call the original method
+                return original_method(message, *args, **kwargs)
+
+            return patched_method
+
+        # Replace the method with our patched version
+        setattr(logger, level, create_patched_method(original_methods[level], level))
 
 
 def get_version() -> str:
@@ -154,7 +162,7 @@ def get_version() -> str:
         from importlib.metadata import version
 
         return version("lokikit")
-    except:
+    except Exception:
         return "unknown"
 
 
@@ -165,10 +173,6 @@ def get_logger():
         Loguru logger instance
     """
     return logger
-
-
-# Patch existing code that might use the standard logging module
-import logging
 
 
 class InterceptHandler(logging.Handler):
@@ -188,7 +192,7 @@ class InterceptHandler(logging.Handler):
 
         # Find caller from where originated the logged message
         frame, depth = logging.currentframe(), 2
-        while frame.f_code.co_filename == logging.__file__:
+        while frame and frame.f_code.co_filename == logging.__file__:
             frame = frame.f_back
             depth += 1
 

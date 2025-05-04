@@ -211,7 +211,7 @@ def test_ensure_dir_new(temp_dir):
 # Test Promtail Configuration
 
 
-@patch("lokikit.logging.get_logger")
+@patch("lokikit.logger.get_logger")
 def test_update_promtail_config_new_path(mock_get_logger, promtail_config_file, temp_dir):
     """Test adding a new log path to Promtail config."""
     config_path, _ = promtail_config_file
@@ -219,9 +219,7 @@ def test_update_promtail_config_new_path(mock_get_logger, promtail_config_file, 
     mock_get_logger.return_value = mock_logger
 
     # Add a new log path
-    result = update_promtail_config(
-        temp_dir, "/tmp/test.log", job_name="test_job", labels={"app": "test_app"}
-    )
+    result = update_promtail_config(temp_dir, "/tmp/test.log", job_name="test_job", labels={"app": "test_app"})
 
     assert result
     mock_logger.info.assert_called()
@@ -244,22 +242,17 @@ def test_update_promtail_config_new_path(mock_get_logger, promtail_config_file, 
     assert "/tmp/test.log" in new_job["static_configs"][0]["labels"]["__path__"]
 
 
-@patch("lokikit.logging.get_logger")
+@patch("lokikit.logger.get_logger")
 def test_update_promtail_config_path_exists(mock_get_logger, promtail_config_file, temp_dir):
     """Test handling when a path already exists in the config."""
-    config_path, _ = promtail_config_file
     mock_logger = MagicMock()
     mock_get_logger.return_value = mock_logger
 
     # First add a path
-    result1 = update_promtail_config(
-        temp_dir, "/tmp/test.log", job_name="test_job", labels={"app": "test_app"}
-    )
+    result1 = update_promtail_config(temp_dir, "/tmp/test.log", job_name="test_job", labels={"app": "test_app"})
 
     # Now try to add the same path again
-    result2 = update_promtail_config(
-        temp_dir, "/tmp/test.log", job_name="another_job", labels={"app": "another_app"}
-    )
+    result2 = update_promtail_config(temp_dir, "/tmp/test.log", job_name="another_job", labels={"app": "another_app"})
 
     # The first one should succeed, but the second one should fail
     # because the path already exists
@@ -270,7 +263,7 @@ def test_update_promtail_config_path_exists(mock_get_logger, promtail_config_fil
     mock_logger.info.assert_any_call("Path /tmp/test.log is already being watched.")
 
 
-@patch("lokikit.logging.get_logger")
+@patch("lokikit.logger.get_logger")
 def test_update_promtail_config_missing_file(mock_get_logger, temp_dir):
     """Test updating a missing Promtail config file."""
     mock_logger = MagicMock()
@@ -288,7 +281,7 @@ def test_update_promtail_config_missing_file(mock_get_logger, temp_dir):
     mock_logger.error.assert_called()
 
 
-@patch("lokikit.logging.get_logger")
+@patch("lokikit.logger.get_logger")
 def test_update_promtail_config_invalid_file(mock_get_logger, temp_dir):
     """Test updating an invalid Promtail config file."""
     invalid_config_path = os.path.join(temp_dir, "promtail-config.yaml")
@@ -300,9 +293,7 @@ def test_update_promtail_config_invalid_file(mock_get_logger, temp_dir):
     mock_logger = MagicMock()
     mock_get_logger.return_value = mock_logger
 
-    result = update_promtail_config(
-        temp_dir, "/tmp/test.log", job_name="test_job", labels={"app": "test_app"}
-    )
+    result = update_promtail_config(temp_dir, "/tmp/test.log", job_name="test_job", labels={"app": "test_app"})
 
     assert not result
     mock_logger.error.assert_called()
@@ -312,7 +303,7 @@ def test_update_promtail_config_invalid_file(mock_get_logger, temp_dir):
         os.remove(invalid_config_path)
 
 
-@patch("lokikit.logging.get_logger")
+@patch("lokikit.logger.get_logger")
 def test_update_promtail_config_empty_file(mock_get_logger, temp_dir):
     """Test updating an empty Promtail config file."""
     empty_config_path = os.path.join(temp_dir, "promtail-config.yaml")
@@ -324,9 +315,7 @@ def test_update_promtail_config_empty_file(mock_get_logger, temp_dir):
     mock_logger = MagicMock()
     mock_get_logger.return_value = mock_logger
 
-    result = update_promtail_config(
-        temp_dir, "/tmp/test.log", job_name="test_job", labels={"app": "test_app"}
-    )
+    result = update_promtail_config(temp_dir, "/tmp/test.log", job_name="test_job", labels={"app": "test_app"})
 
     assert not result
     mock_logger.error.assert_called()
@@ -336,7 +325,7 @@ def test_update_promtail_config_empty_file(mock_get_logger, temp_dir):
         os.remove(empty_config_path)
 
 
-@patch("lokikit.logging.get_logger")
+@patch("lokikit.logger.get_logger")
 def test_update_promtail_config_importing_error(mock_get_logger):
     """Test handling of importing errors during Promtail config update."""
     MagicMock()

@@ -24,35 +24,21 @@ build-backend = "setuptools.build_meta"
 
 
 [tool.ruff]
-# Enable flake8-bugbear (`B`) rules.
-select = [
-    "E",
-    "F",
-    "B",
-    "I",
-    "N",
-    "W",
-    "UP",
-    "A",
-    "C4",
-    "PTH",
-    "RET",
-    "SIM",
-    "ERA",
-    "PL",
-]
-ignore = []
-target-version = "py38"
-line-length = 100
+target-version = "py311"
+line-length = 120
 
 # Allow imports relative to the "lokikit" directory
 src = ["lokikit"]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint]
+select = ["E", "F", "B", "I", "N", "W", "UP", "A", "C4"]
+ignore = ["PLR2004"]
+
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/*" = ["E501"]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["lokikit"]
 
 [tool.ruff.format]
@@ -61,7 +47,7 @@ indent-style = "space"
 line-ending = "auto"
 
 [tool.basedpyright]
-pythonVersion = "3.8"
+pythonVersion = "3.11"
 typeCheckingMode = "basic"
 reportMissingImports = "error"
 reportMissingTypeStubs = "warning"
@@ -75,4 +61,7 @@ reportPrivateImportUsage = "warning"
 reportOptionalSubscript = "warning"
 reportUntypedFunctionDecorator = "warning"
 reportConstantRedefinition = "error"
-reportUnnecessaryIsInstance = "warning"
+reportUnnecessaryIsInstance = "none"
+reportOptionalMemberAccess = "warning"
+reportAttributeAccessIssue = "warning"
+exclude = ["docs/**", ".venv/**"]

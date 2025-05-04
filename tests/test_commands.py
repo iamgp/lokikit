@@ -45,8 +45,8 @@ def setup_test_env():
     for root, dirs, files in os.walk(temp_dir, topdown=False):
         for file in files:
             os.remove(os.path.join(root, file))
-        for dir in dirs:
-            os.rmdir(os.path.join(root, dir))
+        for directory in dirs:
+            os.rmdir(os.path.join(root, directory))
     os.rmdir(temp_dir)
 
 
@@ -174,9 +174,7 @@ def test_setup_command_with_custom_log_paths(
     mock_get_binaries.return_value = binaries
 
     # Set up custom log paths in config
-    ctx.obj["CONFIG"] = {
-        "promtail": {"log_paths": [{"path": "/var/log/test.log", "labels": {"job": "test"}}]}
-    }
+    ctx.obj["CONFIG"] = {"promtail": {"log_paths": [{"path": "/var/log/test.log", "labels": {"job": "test"}}]}}
 
     # Mock that binaries already exist
     mock_exists.return_value = True
@@ -236,8 +234,8 @@ def start_test_env():
     for root, dirs, files in os.walk(temp_dir, topdown=False):
         for file in files:
             os.remove(os.path.join(root, file))
-        for dir in dirs:
-            os.rmdir(os.path.join(root, dir))
+        for directory in dirs:
+            os.rmdir(os.path.join(root, directory))
     os.rmdir(temp_dir)
 
 
@@ -265,7 +263,7 @@ def test_start_command_foreground(
     start_test_env,
 ):
     """Test start command in foreground mode."""
-    ctx, temp_dir, mock_logger, pid_file = start_test_env
+    ctx, temp_dir, _, _ = start_test_env
 
     # Mock no existing PID file
     mock_read_pid.return_value = None
@@ -344,7 +342,7 @@ def test_start_command_background(
     start_test_env,
 ):
     """Test start command in background mode."""
-    ctx, temp_dir, mock_logger, pid_file = start_test_env
+    ctx, temp_dir, _, _ = start_test_env
 
     # Mock no existing PID file
     mock_read_pid.return_value = None
@@ -599,7 +597,7 @@ def test_start_missing_configs(
     start_test_env,
 ):
     """Test start command when config files are missing."""
-    ctx, temp_dir, mock_logger, pid_file = start_test_env
+    ctx, temp_dir, mock_logger, _ = start_test_env
 
     # Mock no existing PID file
     mock_read_pid.return_value = None
@@ -681,8 +679,8 @@ def stop_test_env():
     for root, dirs, files in os.walk(temp_dir, topdown=False):
         for file in files:
             os.remove(os.path.join(root, file))
-        for dir in dirs:
-            os.rmdir(os.path.join(root, dir))
+        for directory in dirs:
+            os.rmdir(os.path.join(root, directory))
     os.rmdir(temp_dir)
 
 
@@ -691,9 +689,7 @@ def stop_test_env():
 @patch("os.path.exists")
 @patch("os.remove")
 @patch("sys.exit")
-def test_stop_command_success(
-    mock_exit, mock_remove, mock_exists, mock_stop, mock_read_pid, stop_test_env
-):
+def test_stop_command_success(mock_exit, mock_remove, mock_exists, mock_stop, mock_read_pid, stop_test_env):
     """Test stopping services successfully."""
     ctx, temp_dir, mock_logger = stop_test_env
 
@@ -777,7 +773,7 @@ def test_stop_command_success(
 @patch("sys.exit")
 def test_stop_command_no_pid_file(mock_exit, mock_exists, mock_read_pid, stop_test_env):
     """Test handling when no PID file exists."""
-    ctx, temp_dir, mock_logger = stop_test_env
+    ctx, _, mock_logger = stop_test_env
 
     # Mock no PIDs file
     mock_read_pid.return_value = None
@@ -797,9 +793,7 @@ def test_stop_command_no_pid_file(mock_exit, mock_exists, mock_read_pid, stop_te
 @patch("os.path.exists")
 @patch("os.remove")
 @patch("sys.exit")
-def test_stop_command_with_force(
-    mock_exit, mock_remove, mock_exists, mock_stop, mock_read_pid, stop_test_env
-):
+def test_stop_command_with_force(mock_exit, mock_remove, mock_exists, mock_stop, mock_read_pid, stop_test_env):
     """Test stopping services with force option."""
     ctx, temp_dir, mock_logger = stop_test_env
 
@@ -873,17 +867,16 @@ def status_test_env():
     for root, dirs, files in os.walk(temp_dir, topdown=False):
         for file in files:
             os.remove(os.path.join(root, file))
-        for dir in dirs:
-            os.rmdir(os.path.join(root, dir))
+        for directory in dirs:
+            os.rmdir(os.path.join(root, directory))
     os.rmdir(temp_dir)
 
 
 @patch("lokikit.commands.read_pid_file")
 @patch("lokikit.commands.check_services_running")
-@patch("lokikit.commands.click.echo")
-def test_status_all_running(mock_echo, mock_check, mock_read_pid, status_test_env):
+def test_status_all_running(mock_check, mock_read_pid, status_test_env):
     """Test status when all services are running."""
-    ctx, temp_dir, mock_logger = status_test_env
+    ctx, _, mock_logger = status_test_env
 
     # Mock PIDs file
     pids = {"loki": 1000, "promtail": 2000, "grafana": 3000}
@@ -915,7 +908,7 @@ def test_status_all_running(mock_echo, mock_check, mock_read_pid, status_test_en
 @patch("lokikit.commands.check_services_running")
 def test_status_not_running(mock_check, mock_read_pid, status_test_env):
     """Test status when services are not running."""
-    ctx, temp_dir, mock_logger = status_test_env
+    ctx, _, mock_logger = status_test_env
 
     # Mock PIDs file
     pids = {"loki": 1000, "promtail": 2000, "grafana": 3000}
@@ -946,7 +939,7 @@ def test_status_not_running(mock_check, mock_read_pid, status_test_env):
 @patch("lokikit.commands.read_pid_file")
 def test_status_no_pid_file(mock_read_pid, status_test_env):
     """Test status when no PID file exists."""
-    ctx, temp_dir, mock_logger = status_test_env
+    ctx, _, mock_logger = status_test_env
 
     # Mock no PIDs file
     mock_read_pid.return_value = None
@@ -961,10 +954,7 @@ def test_status_no_pid_file(mock_read_pid, status_test_env):
     any_not_started = False
     for call_args in mock_logger.info.call_args_list:
         call_str = str(call_args)
-        if any(
-            msg in call_str.lower()
-            for msg in ["not started", "not running", "no services", "appear"]
-        ):
+        if any(msg in call_str.lower() for msg in ["not started", "not running", "no services", "appear"]):
             any_not_started = True
             break
     assert any_not_started
@@ -990,8 +980,8 @@ def watch_test_env():
     for root, dirs, files in os.walk(temp_dir, topdown=False):
         for file in files:
             os.remove(os.path.join(root, file))
-        for dir in dirs:
-            os.rmdir(os.path.join(root, dir))
+        for directory in dirs:
+            os.rmdir(os.path.join(root, directory))
     os.rmdir(temp_dir)
 
 
@@ -1011,9 +1001,7 @@ def test_watch_command_success(mock_update, watch_test_env):
     mock_update.assert_called_once_with(temp_dir, path, None, {})
 
     # Verify debug logging at minimum
-    mock_logger.debug.assert_any_call(
-        f"Adding log path '{path}' with job 'None' to Promtail config..."
-    )
+    mock_logger.debug.assert_any_call(f"Adding log path '{path}' with job 'None' to Promtail config...")
 
 
 @patch("lokikit.commands.update_promtail_config")
@@ -1033,7 +1021,7 @@ def test_watch_command_with_options(mock_update, watch_test_env):
 
     # Verify config update was called with correct args
     mock_update.assert_called_once()
-    args, kwargs = mock_update.call_args
+    args, _ = mock_update.call_args
     assert args[0] == temp_dir
     assert args[1] == path
     assert args[2] == job
@@ -1043,15 +1031,13 @@ def test_watch_command_with_options(mock_update, watch_test_env):
     assert labels_dict["env"] == "dev"
 
     # Verify debug logging at minimum
-    mock_logger.debug.assert_any_call(
-        f"Adding log path '{path}' with job '{job}' to Promtail config..."
-    )
+    mock_logger.debug.assert_any_call(f"Adding log path '{path}' with job '{job}' to Promtail config...")
 
 
 @patch("lokikit.commands.update_promtail_config")
 def test_watch_command_failure(mock_update, watch_test_env):
     """Test watch command with update failure."""
-    ctx, temp_dir, mock_logger = watch_test_env
+    ctx, _, mock_logger = watch_test_env
 
     # Mock failed config update
     mock_update.return_value = False
@@ -1075,7 +1061,7 @@ def test_watch_command_failure(mock_update, watch_test_env):
 @patch("lokikit.commands.update_promtail_config")
 def test_watch_command_invalid_label(mock_update, watch_test_env):
     """Test watch command with invalid label format."""
-    ctx, temp_dir, mock_logger = watch_test_env
+    ctx, _, mock_logger = watch_test_env
 
     # Run command with invalid label
     path = "/var/log/test.log"
@@ -1118,8 +1104,8 @@ def clean_test_env():
     for root, dirs, files in os.walk(temp_dir, topdown=False):
         for file in files:
             os.remove(os.path.join(root, file))
-        for dir in dirs:
-            os.rmdir(os.path.join(root, dir))
+        for directory in dirs:
+            os.rmdir(os.path.join(root, directory))
     os.rmdir(temp_dir)
 
 
@@ -1149,11 +1135,9 @@ def test_clean_command_success(mock_exit, mock_rmtree, mock_read_pid, mock_check
 @patch("lokikit.commands.read_pid_file")
 @patch("shutil.rmtree")
 @patch("sys.exit")
-def test_clean_command_services_running(
-    mock_exit, mock_rmtree, mock_read_pid, mock_check, clean_test_env
-):
+def test_clean_command_services_running(mock_exit, mock_rmtree, mock_read_pid, mock_check, clean_test_env):
     """Test clean command with services still running."""
-    ctx, temp_dir, mock_logger = clean_test_env
+    ctx, _, mock_logger = clean_test_env
 
     # First clear any previous usage of the mocks
     mock_rmtree.reset_mock()
@@ -1184,9 +1168,7 @@ def test_clean_command_services_running(
     mock_exit.assert_called_once_with(1)
 
     # Verify warning was logged
-    assert any(
-        "Services are still running" in str(call) for call in mock_logger.warning.call_args_list
-    )
+    assert any("Services are still running" in str(call) for call in mock_logger.warning.call_args_list)
 
 
 @patch("lokikit.commands.check_services_running")
@@ -1194,11 +1176,9 @@ def test_clean_command_services_running(
 @patch("shutil.rmtree")
 @patch("os.path.exists")
 @patch("sys.exit")
-def test_clean_command_removal_error(
-    mock_exit, mock_exists, mock_rmtree, mock_read_pid, mock_check, clean_test_env
-):
+def test_clean_command_removal_error(mock_exit, mock_exists, mock_rmtree, mock_read_pid, mock_check, clean_test_env):
     """Test clean command with directory removal error."""
-    ctx, temp_dir, mock_logger = clean_test_env
+    ctx, _, mock_logger = clean_test_env
 
     # Mock no running services
     mock_read_pid.return_value = None
@@ -1250,8 +1230,8 @@ def force_quit_test_env():
     for root, dirs, files in os.walk(temp_dir, topdown=False):
         for file in files:
             os.remove(os.path.join(root, file))
-        for dir in dirs:
-            os.rmdir(os.path.join(root, dir))
+        for directory in dirs:
+            os.rmdir(os.path.join(root, directory))
     os.rmdir(temp_dir)
 
 
@@ -1259,11 +1239,9 @@ def force_quit_test_env():
 @patch("os.path.exists")
 @patch("os.remove")
 @patch("sys.exit")
-def test_force_quit_command_success(
-    mock_exit, mock_remove, mock_exists, mock_run, force_quit_test_env
-):
+def test_force_quit_command_success(mock_exit, mock_remove, mock_exists, mock_run, force_quit_test_env):
     """Test force-quit command with successful termination."""
-    ctx, temp_dir, mock_logger, pid_file = force_quit_test_env
+    ctx, _, mock_logger, pid_file = force_quit_test_env
 
     # Mock PID file exists
     mock_exists.return_value = True
@@ -1289,7 +1267,7 @@ def test_force_quit_command_success(
 @patch("sys.exit")
 def test_force_quit_command_no_processes(mock_exit, mock_exists, mock_run, force_quit_test_env):
     """Test force-quit command with no running processes."""
-    ctx, temp_dir, mock_logger, pid_file = force_quit_test_env
+    ctx, _, mock_logger, _ = force_quit_test_env
 
     # Mock PID file doesn't exist
     mock_exists.return_value = False
@@ -1311,11 +1289,9 @@ def test_force_quit_command_no_processes(mock_exit, mock_exists, mock_run, force
 @patch("os.path.exists")
 @patch("os.remove")
 @patch("sys.exit")
-def test_force_quit_command_kill_error(
-    mock_exit, mock_remove, mock_exists, mock_run, force_quit_test_env
-):
+def test_force_quit_command_kill_error(mock_exit, mock_remove, mock_exists, mock_run, force_quit_test_env):
     """Test force-quit command with kill command error."""
-    ctx, temp_dir, mock_logger, pid_file = force_quit_test_env
+    ctx, _, mock_logger, pid_file = force_quit_test_env
 
     # Mock PID file exists
     mock_exists.return_value = True

@@ -20,7 +20,7 @@ from lokikit.config import (
     load_config_file,
     merge_config,
 )
-from lokikit.logging import setup_logging
+from lokikit.logger import setup_logging
 
 
 @click.group()
@@ -117,9 +117,7 @@ def setup(ctx):
     default=False,
     help="Run services in the background and return to terminal.",
 )
-@click.option(
-    "--force", is_flag=True, default=False, help="Force start even if services are already running."
-)
+@click.option("--force", is_flag=True, default=False, help="Force start even if services are already running.")
 @click.option(
     "--timeout",
     default=20,
@@ -133,9 +131,7 @@ def start(ctx, background, force, timeout):
 
 
 @cli.command()
-@click.option(
-    "--force", is_flag=True, default=False, help="Use SIGKILL to forcefully terminate services."
-)
+@click.option("--force", is_flag=True, default=False, help="Use SIGKILL to forcefully terminate services.")
 @click.pass_context
 def stop(ctx, force):
     """Stop running services."""
@@ -159,9 +155,7 @@ def clean(ctx):
 @cli.command()
 @click.argument("path")
 @click.option("--job", help="Job name for the log path.")
-@click.option(
-    "--label", multiple=True, help="Labels in format key=value. Can be specified multiple times."
-)
+@click.option("--label", multiple=True, help="Labels in format key=value. Can be specified multiple times.")
 @click.pass_context
 def watch(ctx, path, job, label):
     """Add a log path to Promtail configuration.

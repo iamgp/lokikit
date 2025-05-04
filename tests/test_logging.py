@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lokikit.logging import get_version, setup_logging
+from lokikit.logger import get_version, setup_logging
 
 
 @pytest.fixture
@@ -35,9 +35,7 @@ def test_log_file_creation(temp_log_dir):
     # Find the created log file
     files = os.listdir(logs_dir)
     assert files, "No log files were created"
-    assert any(
-        f.startswith("lokikit_") and f.endswith(".log") for f in files
-    ), "No lokikit log file found"
+    assert any(f.startswith("lokikit_") and f.endswith(".log") for f in files), "No lokikit log file found"
 
 
 @pytest.fixture
@@ -49,7 +47,7 @@ def logging_setup():
     serializer = None
 
     # Set up mock for log file
-    with patch("lokikit.logging.logger.add") as mock_add:
+    with patch("lokikit.logger.logger.add") as mock_add:
         # Capture the serializer function when logger.add is called
         def capture_serializer(*args, **kwargs):
             nonlocal serializer
@@ -90,7 +88,7 @@ def logging_setup():
 
 def test_json_serialization(logging_setup):
     """Test that logs are properly serialized to JSON."""
-    temp_dir, log_file, serializer, mock_record = logging_setup
+    _, _, serializer, mock_record = logging_setup
 
     # Ensure serializer was captured
     assert serializer is not None, "Serializer function not captured"
@@ -113,7 +111,7 @@ def test_json_serialization(logging_setup):
 
 def test_context_serialization(logging_setup):
     """Test that context is properly included in JSON output."""
-    temp_dir, log_file, serializer, mock_record = logging_setup
+    _, _, serializer, mock_record = logging_setup
 
     # Test record with context
     mock_record["extra"] = {"context": {"user_id": "12345", "request_id": "req-123"}}
@@ -129,7 +127,7 @@ def test_context_serialization(logging_setup):
 
 def test_exception_serialization(logging_setup):
     """Test that exceptions are properly included in JSON output."""
-    temp_dir, log_file, serializer, mock_record = logging_setup
+    _, _, serializer, mock_record = logging_setup
 
     # Test record with exception
     mock_record["exception"] = "Traceback info here"
@@ -144,7 +142,7 @@ def test_exception_serialization(logging_setup):
 
 def test_intercept_handler():
     """Test that InterceptHandler forwards messages to loguru."""
-    with patch("lokikit.logging.logger.opt") as mock_opt:
+    with patch("lokikit.logger.logger.opt") as mock_opt:
         # Create a standard logging record
         record = standard_logging.LogRecord(
             name="test_logger",
@@ -161,7 +159,7 @@ def test_intercept_handler():
         mock_opt.return_value = mock_bound_logger
 
         # Import handler and call emit
-        from lokikit.logging import InterceptHandler
+        from lokikit.logger import InterceptHandler
 
         handler = InterceptHandler()
         handler.emit(record)

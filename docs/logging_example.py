@@ -9,7 +9,7 @@ keeping console output minimal.
 import os
 from datetime import datetime
 
-from lokikit.logging import get_logger, setup_logging
+from lokikit.logger import get_logger, setup_logging
 
 # Assuming we're running from the project root
 base_dir = os.path.expanduser("~/.lokikit")
@@ -24,9 +24,7 @@ logger.debug("This debug message will appear in the log file but not console")
 logger.warning("Warning: this is a warning message")
 
 # Using direct kwargs for context (simplest approach)
-logger.info(
-    "Processing configuration file", file_path="/etc/myapp/config.yaml", environment="development"
-)
+logger.info("Processing configuration file", file_path="/etc/myapp/config.yaml", environment="development")
 
 # You can still use the explicit context parameter if preferred
 logger.info("User profile loaded", context={"user_id": "12345", "session_id": "abc-123"})
@@ -64,10 +62,7 @@ with logger.contextualize(context={"request_id": "req-456", "api": "users"}):
 
 logger.success("Application completed successfully")  # Loguru has more log levels!
 
-print(
-    "\nCheck the log file at: "
-    + os.path.join(base_dir, "logs", f"lokikit_{datetime.now().strftime('%Y%m%d')}.log")
-)
+print("\nCheck the log file at: " + os.path.join(base_dir, "logs", f"lokikit_{datetime.now().strftime('%Y%m%d')}.log"))
 print("The log file contains structured JSON that will work well with Loki queries.")
 print("Example LogQL queries:")
 print('  {job="lokikit"} | json | level="ERROR"')
