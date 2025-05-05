@@ -4,7 +4,6 @@ Utilities for managing Loki jobs in LokiKit.
 
 import logging
 import os
-from typing import Dict, List, Optional
 
 import yaml
 
@@ -12,7 +11,7 @@ from lokikit.config import update_promtail_config
 
 
 def ensure_job_exists(
-    base_dir: str, job_name: str, log_path: Optional[str] = None, labels: Optional[Dict[str, str]] = None
+    base_dir: str, job_name: str, log_path: str | None = None, labels: dict[str, str] | None = None
 ) -> bool:
     """
     Check if a job exists in Promtail configuration, and create it if it doesn't.
@@ -83,7 +82,7 @@ def job_exists_in_config(base_dir: str, job_name: str) -> bool:
     return False
 
 
-def get_all_jobs(base_dir: str) -> List[str]:
+def get_all_jobs(base_dir: str) -> list[str]:
     """
     Get a list of all configured jobs in Promtail.
 
@@ -117,7 +116,7 @@ def get_all_jobs(base_dir: str) -> List[str]:
     return jobs
 
 
-def get_job_paths(base_dir: str, job_name: str) -> List[str]:
+def get_job_paths(base_dir: str, job_name: str) -> list[str]:
     """
     Get the log paths associated with a specific job.
 
