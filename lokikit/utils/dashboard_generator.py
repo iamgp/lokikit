@@ -1,13 +1,70 @@
 """Utilities for generating Grafana dashboards from log data."""
 
 import json
-import logging
 import os
 import re
 
-import yaml
 
-from lokikit.download import find_grafana_binary, get_binaries
+# from lokikit.download import find_grafana_binary, get_binaries
+
+
+def detect_log_format(sample_logs: list[str]) -> dict:
+    """Analyzes sample logs to detect the format structure.
+
+    Args:
+        sample_logs: List of sample log lines
+
+    Returns:
+        Dictionary with detection results including format type and other metadata
+    """
+    result = {
+        "format_type": "unknown",
+        "is_json": False,
+        "has_level": False,
+        "level_pattern": None,
+        "message_pattern": None,
+        "json_pattern": None,
+    }
+
+    if not sample_logs:
+        return result
+
+    # Check for various log formats based on samples
+    json_count = 0
+    level_patterns = [
+        r"\| (DEBUG|INFO|WARN|WARNING|ERROR|FATAL|TRACE)\s+\|",  # Pipe separated format
+        r"(DEBUG|INFO|WARN|WARNING|ERROR|FATAL|TRACE):",  # Level with colon
+        r"\[(DEBUG|INFO|WARN|WARNING|ERROR|FATAL|TRACE)\]",  # Level in brackets
+    ]
+
+    for log in sample_logs:
+        # Check if it's a pure JSON log
+        if log.strip().startswith("{") and log.strip().endswith("}"):
+            json_count += 1
+
+        # Check for common log level patterns
+        for pattern in level_patterns:
+            if re.search(pattern, log):
+                result["has_level"] = True
+                result["level_pattern"] = pattern
+                break
+
+        # Check for embedded JSON objects
+        if "{" in log and "}" in log:
+            json_match = re.search(r"(\{.*\})", log)
+            if json_match:
+                result["json_pattern"] = r"(\{.*\})"
+
+    # Determine format type based on the analysis
+    if json_count > len(sample_logs) * 0.7:  # More than 70% are pure JSON
+        result["format_type"] = "json"
+        result["is_json"] = True
+    elif result["has_level"] and result["json_pattern"]:
+        result["format_type"] = "structured_with_json"
+    elif result["has_level"]:
+        result["format_type"] = "structured"
+
+    return result
 
 
 def create_dashboard(
@@ -16,6 +73,7 @@ def create_dashboard(
     job_name: str | None = None,
     labels: dict[str, str] | None = None,
     field_types: dict[str, set[str]] | None = None,
+    sample_logs: list[str] | None = None,
 ) -> dict:
     """Create a Grafana dashboard JSON for the given fields.
 
@@ -25,6 +83,7 @@ def create_dashboard(
         job_name: Optional job name for filtering logs
         labels: Optional additional labels for filtering logs
         field_types: Optional dictionary mapping field names to their detected types
+        sample_logs: Optional list of sample log lines for format detection
 
     Returns:
         Dictionary containing the dashboard JSON definition
@@ -77,6 +136,11 @@ def create_dashboard(
         for k, v in labels.items():
             dashboard["description"] += f"- {k}: {v}\n"
 
+    # Add log format detection to create more appropriate panel queries
+    log_format = {"format_type": "unknown"}
+    if sample_logs:
+        log_format = detect_log_format(sample_logs)
+
     # Build the base Loki query (without fields for the logs panel)
     base_query = build_loki_query(job_name, labels, None)
 
@@ -108,9 +172,9 @@ This dashboard displays logs from **{job_name or "all sources"}**
         "targets": [
             {
                 "refId": "A",
-                "expr": f"{base_query} | rate [5m]",
+                "expr": f"sum(count_over_time({base_query}[5m])) by (job)",
                 "queryType": "range",
-                "legendFormat": "Logs per second",
+                "legendFormat": "Logs per 5m",
             }
         ],
         "options": {
@@ -123,7 +187,7 @@ This dashboard displays logs from **{job_name or "all sources"}**
                 "custom": {
                     "axisCenteredZero": False,
                     "axisColorMode": "text",
-                    "axisLabel": "Logs/sec",
+                    "axisLabel": "Logs/5m",
                     "axisPlacement": "auto",
                     "barAlignment": 0,
                     "drawStyle": "line",
@@ -140,7 +204,7 @@ This dashboard displays logs from **{job_name or "all sources"}**
                     "thresholdsStyle": {"mode": "off"},
                 },
                 "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
-                "unit": "ops",
+                "unit": "short",
             },
         },
     }
@@ -169,12 +233,27 @@ This dashboard displays logs from **{job_name or "all sources"}**
     # Current Y position for panels
     y_pos = header_row_height + 9  # After logs panel
 
-    # Create a table panel for structured fields
-    if fields:
-        # Build a query with field extraction
-        fields_query = build_loki_query(job_name, labels, fields)
+    # Modify the get_pattern_query function to use detected format
+    def get_pattern_for_dashboard(pattern_type: str) -> str:
+        """Generate patterns based on detected log format"""
+        # Use log format detection results to generate better patterns
+        if log_format["format_type"] == "json":
+            # For pure JSON logs, always use JSON extraction
+            return get_pattern_query(base_query, "json")
+        elif log_format["format_type"] == "structured_with_json":
+            # For structured logs with embedded JSON, use appropriate pattern
+            if pattern_type == "structured" and log_format["json_pattern"]:
+                # Use the detected JSON pattern
+                return f'{base_query} | pattern "{log_format["json_pattern"]}"'
+            else:
+                return get_pattern_query(base_query, pattern_type)
+        else:
+            # Default fallback to regular pattern matching
+            return get_pattern_query(base_query, pattern_type)
 
-        table_panel = {
+    # Add structured fields table
+    if fields:
+        fields_panel = {
             "id": 4,
             "title": "Structured Fields",
             "type": "table",
@@ -183,67 +262,144 @@ This dashboard displays logs from **{job_name or "all sources"}**
             "targets": [
                 {
                     "refId": "A",
-                    "expr": fields_query,
-                    "queryType": "instant",
-                    "legendFormat": "",
+                    "expr": f'{base_query} | pattern "<_>\\\\| (?P<level>[A-Z]+)\\\\s+\\\\| (?P<message>[^|]+) \\\\| (?P<details>\\\\{{.*\\\\}})" | line_format "{{.level}} {{.message}} {{.details}}"',
+                    "queryType": "range",
                 }
             ],
             "fieldConfig": {
                 "defaults": {
                     "color": {"mode": "thresholds"},
-                    "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": True},
+                    "custom": {
+                        "align": "auto",
+                        "cellOptions": {"type": "auto"},
+                        "filterable": True,
+                        "inspect": False,
+                    },
                     "mappings": [],
                     "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
                 },
-                "overrides": [],
+                "overrides": [
+                    {
+                        "matcher": {"id": "byName", "options": "Time"},
+                        "properties": [{"id": "custom.width", "value": 200}],
+                    },
+                    {
+                        "matcher": {"id": "byName", "options": "level"},
+                        "properties": [
+                            {"id": "color", "value": {"mode": "thresholds", "seriesBy": "last"}},
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "options": {
+                                            "ERROR": {"color": "red", "index": 2},
+                                            "INFO": {"color": "blue", "index": 0},
+                                            "WARN": {"color": "orange", "index": 1},
+                                        },
+                                        "type": "value",
+                                    }
+                                ],
+                            },
+                            {"id": "custom.width", "value": 100},
+                        ],
+                    },
+                    {
+                        "matcher": {"id": "byName", "options": "message"},
+                        "properties": [{"id": "custom.width", "value": 300}],
+                    },
+                    {
+                        "matcher": {"id": "byName", "options": "job"},
+                        "properties": [{"id": "custom.hidden", "value": True}],
+                    },
+                    {
+                        "matcher": {"id": "byName", "options": "Line"},
+                        "properties": [{"id": "custom.hidden", "value": True}],
+                    },
+                    {
+                        "matcher": {"id": "byName", "options": "id"},
+                        "properties": [{"id": "custom.hidden", "value": True}],
+                    },
+                    {
+                        "matcher": {"id": "byName", "options": "tsNs"},
+                        "properties": [{"id": "custom.hidden", "value": True}],
+                    },
+                    {
+                        "matcher": {"id": "byName", "options": "labels"},
+                        "properties": [{"id": "custom.hidden", "value": True}],
+                    },
+                ],
             },
             "options": {
                 "footer": {"enablePagination": True, "fields": "", "reducer": ["sum"], "show": False},
                 "showHeader": True,
+                "sortBy": [{"desc": True, "displayName": "Time"}],
             },
+            "transformations": [
+                {
+                    "id": "extractFields",
+                    "options": {
+                        "format": "json",
+                        "source": "details",
+                    },
+                },
+                {
+                    "id": "organize",
+                    "options": {
+                        "excludeByName": {
+                            "Line": True,
+                            "id": True,
+                            "job": True,
+                            "labels": True,
+                            "tsNs": True,
+                        },
+                        "indexByName": {
+                            "Time": 0,
+                            "level": 1,
+                            "message": 2,
+                        },
+                        "renameByName": {},
+                    },
+                },
+            ],
         }
-        dashboard["panels"].append(table_panel)
+        dashboard["panels"].append(fields_panel)
         y_pos += 8
 
-        # Create individual field panels for numeric/string fields (up to 4)
+        # Create timeseries charts for numeric fields
         numeric_fields = []
-        string_fields = []
+        for field, types in field_types.items():
+            if ("int" in types or "float" in types or "number" in types) and field in fields:
+                numeric_fields.append(field)
 
-        # Only process up to 8 fields to avoid dashboard clutter
-        for field in fields[:8]:
-            # Check field type based on example data
-            field_type = "string"  # Default to string
-            for types in field_types.get(field, {"string"}):
-                if types in ("int", "float", "number"):
-                    field_type = "number"
-                    numeric_fields.append(field)
-                    break
-
-            if field_type == "string" and field not in string_fields:
-                string_fields.append(field)
-
-        # Add panels for numeric fields (timeseries)
+        # Group numeric fields into a row of panels
         if numeric_fields:
-            panel_width = min(12, 24 // (len(numeric_fields) or 1))
+            max_panels_per_row = 2
+            field_width = 12  # Each panel takes half the width
+
             for i, field in enumerate(numeric_fields[:4]):  # Limit to 4 numeric fields
-                x_pos = (i * panel_width) % 24
-                if x_pos == 0 and i > 0:
-                    y_pos += 8  # New row
+                x_pos = 0 if i % max_panels_per_row == 0 else 12
+                row_offset = (i // max_panels_per_row) * 8  # Each row is 8 units high
 
                 field_panel = {
                     "id": 10 + i,
                     "title": f"{field} over time",
                     "type": "timeseries",
                     "datasource": {"type": "loki", "uid": "lokikit"},
-                    "gridPos": {"h": 8, "w": panel_width, "x": x_pos, "y": y_pos},
+                    "gridPos": {"h": 8, "w": field_width, "x": x_pos, "y": y_pos + row_offset},
                     "targets": [
                         {
                             "refId": "A",
-                            "expr": f'{base_query} | json | line_format "{{{{.extracted.{field}}}}}"',
+                            "expr": generate_field_query(
+                                base_query, field, False, log_format, get_pattern_for_dashboard
+                            ),
                             "queryType": "range",
                             "legendFormat": field,
                         }
                     ],
+                    "options": {
+                        "tooltip": {"mode": "single", "sort": "none"},
+                        "legend": {"displayMode": "table", "placement": "bottom", "showLegend": False},
+                    },
                     "fieldConfig": {
                         "defaults": {
                             "color": {"mode": "palette-classic"},
@@ -272,41 +428,158 @@ This dashboard displays logs from **{job_name or "all sources"}**
                 }
                 dashboard["panels"].append(field_panel)
 
-            # Move to next row if we added numeric panels
-            if numeric_fields:
-                y_pos += 8
+        # Move to next row if we added numeric panels
+        if numeric_fields:
+            y_pos += 8
 
-        # Add a pie chart for string field distribution
-        if string_fields:
-            for i, field in enumerate(string_fields[:2]):  # Limit to 2 string fields
-                field_panel = {
-                    "id": 20 + i,
-                    "title": f"{field} distribution",
-                    "type": "piechart",
-                    "datasource": {"type": "loki", "uid": "lokikit"},
-                    "gridPos": {"h": 8, "w": 12, "x": i * 12, "y": y_pos},
-                    "targets": [
-                        {
-                            "refId": "A",
-                            "expr": (
-                                f'{base_query} | json | line_format "{{{{.extracted.{field}}}}}" | pattern '
-                                f'`(?P<value>.+)` | count_values "value" [10m]'
-                            ),
-                            "queryType": "instant",
-                            "legendFormat": "{{value}}",
-                        }
-                    ],
-                    "options": {
-                        "displayLabels": ["name", "percent"],
-                        "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]},
-                        "pieType": "pie",
-                        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
-                        "tooltip": {"mode": "single", "sort": "none"},
-                    },
-                }
-                dashboard["panels"].append(field_panel)
+    # Add pie charts for message and level distributions
+    # Update the Message Distribution panel with detected format
+    message_panel = {
+        "id": 20,
+        "title": "Message Distribution",
+        "type": "piechart",
+        "datasource": {"type": "loki", "uid": "lokikit"},
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": y_pos},
+        "targets": [
+            {
+                "refId": "A",
+                "expr": f'{base_query} | pattern "<_>\\\\| (?P<level>[A-Z]+)\\\\s+\\\\| (?P<message>[^|]+) \\\\|" | count_over_time({base_query}[10m]) by (message)',
+                "queryType": "instant",
+                "legendFormat": "{{message}}",
+            }
+        ],
+        "options": {
+            "displayLabels": ["name", "percent"],
+            "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+            "tooltip": {"mode": "single", "sort": "none"},
+        },
+    }
+    dashboard["panels"].append(message_panel)
+
+    # Update the Level Distribution panel with detected format
+    level_panel = {
+        "id": 21,
+        "title": "Level Distribution",
+        "type": "piechart",
+        "datasource": {"type": "loki", "uid": "lokikit"},
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": y_pos},
+        "targets": [
+            {
+                "refId": "A",
+                "expr": f'{base_query} | pattern "<_>\\\\| (?P<level>[A-Z]+)\\\\s+\\\\|" | count_over_time({base_query}[10m]) by (level)',
+                "queryType": "instant",
+                "legendFormat": "{{level}}",
+            }
+        ],
+        "options": {
+            "displayLabels": ["name", "percent"],
+            "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+            "tooltip": {"mode": "single", "sort": "none"},
+        },
+    }
+    dashboard["panels"].append(level_panel)
 
     return dashboard
+
+
+def get_pattern_query(base_query: str, pattern_type: str = "structured") -> str:
+    """Generate an appropriate pattern query based on the pattern type.
+
+    Args:
+        base_query: The base query with job and label selectors
+        pattern_type: Type of pattern to generate (structured, level, message)
+
+    Returns:
+        A Loki query with appropriate pattern matching
+    """
+    # Define multiple pattern options from most specific to most general
+    if pattern_type == "structured":
+        # Try to match structured logs with level, message and JSON details
+        return f'{base_query} | pattern "<_>\\\\| (?P<level>[A-Z]+)\\\\s+\\\\| (?P<message>[^|]+) \\\\| (?P<details>\\\\{{.*\\\\}})" '
+    elif pattern_type == "level_message":
+        # Match logs with level and message only
+        return f'{base_query} | pattern "<_>\\\\| (?P<level>[A-Z]+)\\\\s+\\\\| (?P<message>[^|]+) \\\\|"'
+    elif pattern_type == "level":
+        # Extract just the log level
+        return f'{base_query} | pattern "<_>\\\\| (?P<level>[A-Z]+)\\\\s+\\\\|"'
+    elif pattern_type == "json":
+        # For pure JSON logs, extract fields directly with JSON parser
+        return f"{base_query} | json"
+    elif pattern_type == "json_extract":
+        # Extract JSON content embedded in log lines
+        # This tries to find JSON objects within log lines and parse them
+        return f'{base_query} | pattern ".*(?P<json_data>\\\\{{.*\\\\}}).*" | json'
+    else:
+        # Default fallback - try to extract structured data with a generic approach
+        return f'{base_query} | pattern "<_>(?P<content>.*)" | json'
+
+
+def generate_field_query(
+    base_query: str, field: str, is_distribution: bool = False, log_format: dict | None = None, pattern_generator=None
+) -> str:
+    """Generate a Loki query for a field that correctly handles nested fields.
+
+    Args:
+        base_query: The base query with job and label selectors
+        field: The field name (may include dots for nested fields)
+        is_distribution: Whether this is for a distribution chart (adds pattern and count)
+        log_format: Optional detected log format information
+        pattern_generator: Optional function to generate patterns based on detected format
+
+    Returns:
+        A complete Loki query string
+    """
+    # Use the pattern generator if provided
+    if pattern_generator and log_format and log_format.get("format_type") != "unknown":
+        if field in ["level", "message"]:
+            query = pattern_generator("level_message")
+            if field == "level":
+                query += ' | line_format "{.level}"'
+            else:
+                query += ' | line_format "{.message}"'
+        elif "." in field or field in ["timestamp", "time", "date", "status", "code", "error"]:
+            # For JSON or nested fields, use appropriate extraction
+            if log_format.get("format_type") == "json":
+                query = f'{base_query} | json | line_format "{{.{field}}}"'
+            else:
+                # For structured with JSON, try to extract from the embedded JSON
+                query = pattern_generator("structured")
+                query += f' | json field="{field}" from="details"'
+                query += ' | line_format "{.field}"'
+        else:
+            # For other fields, use the pattern generator
+            query = pattern_generator("structured")
+            query += f' | json field="{field}" from="details"'
+            query += ' | line_format "{.field}"'
+    else:
+        # Fallback to the original implementation
+        if field in ["level", "message"]:
+            query = get_pattern_query(base_query, "level_message")
+            if field == "level":
+                query += ' | line_format "{.level}"'
+            else:
+                query += ' | line_format "{.message}"'
+        elif "." in field or field in ["timestamp", "time", "date", "status", "code", "error"]:
+            # Try multiple extraction strategies for maximum compatibility
+            query = f"{base_query}"
+
+            # Try direct JSON extraction first (for pure JSON logs)
+            query += f' | json | line_format "{{.{field}}}"'
+        else:
+            # Try structured extraction first
+            query = get_pattern_query(base_query, "structured")
+            query += f' | json field="{field}" from="details"'
+            query += ' | line_format "{.field}"'
+
+    # Add pattern matching and counting for distribution charts
+    if is_distribution:
+        query += ' | pattern `(?P<value>.+)` | count_values "value" [10m]'
+
+    return query
 
 
 def build_loki_query(
@@ -325,6 +598,7 @@ def build_loki_query(
     Returns:
         str: The Loki query string
     """
+    # Start by building the selector part
     if job_name or labels:
         query_parts = ["{"]
         selectors = []
@@ -338,115 +612,82 @@ def build_loki_query(
 
         query_parts.append(", ".join(selectors))
         query_parts.append("}")
-
-        # Add field extraction if needed
-        if fields and len(fields) > 0:
-            query_parts.append(" | json")
-
-        # Add line format for selected fields if requested
-        if fields and len(fields) > 0:
-            extracted_fields = ", ".join([f"extracted.{field}" for field in fields])
-            query_parts.append(f' | line_format "{{ {extracted_fields} }}"')
-
-        return "".join(query_parts)
     else:
-        base = "{}"
-        if fields:
-            base += " | json"
-            extracted_fields = " ".join([f"{{{{.extracted.{f}}}}}" for f in fields])
-            base += f' | line_format "{extracted_fields}"'
-        return base
+        query_parts = ["{}"]
+
+    # If no fields are provided, just return the selector
+    if not fields or len(fields) == 0:
+        return "".join(query_parts)
+
+    # Add json parser
+    query_parts.append(" | json")
+
+    # Split fields into categories
+    regular_fields = []
+    record_fields = []
+    other_nested_fields = []
+
+    for field in fields:
+        if "." not in field:
+            regular_fields.append(field)
+        elif field.startswith("record."):
+            record_fields.append(field)
+        else:
+            other_nested_fields.append(field)
+
+    # Build the extraction part, starting with regular fields
+    extracted_fields = []
+    for field in regular_fields:
+        extracted_fields.append(f"{field}")
+
+    # Handle the record fields if any (for structured log formats)
+    if record_fields:
+        for field in record_fields:
+            # Strip off the "record." prefix
+            record_field = field[7:]
+            extracted_fields.append(f"record.{record_field}")
+
+    # Handle other nested fields
+    for field in other_nested_fields:
+        extracted_fields.append(f"{field}")
+
+    # Add extracted fields to the query if any
+    if extracted_fields:
+        extracted_str = ", ".join(f"{field}" for field in extracted_fields)
+        query_parts.append(f' | line_format "{{ {extracted_str} }}"')
+
+    return "".join(query_parts)
 
 
 def save_dashboard(dashboard: dict, base_dir: str, dashboard_name: str) -> str:
-    """Save the dashboard JSON to the appropriate location and configure Grafana provisioning.
+    """Save a dashboard JSON to file and try to provision it to Grafana.
 
     Args:
-        dashboard: Dashboard JSON dictionary
-        base_dir: Base directory for lokikit
-        dashboard_name: Name for the dashboard file
+        dashboard: Dashboard definition dictionary
+        base_dir: Base directory path
+        dashboard_name: Dashboard name
 
     Returns:
-        Path to the saved dashboard file
+        str: Path to saved dashboard file
     """
-    logger = logging.getLogger("lokikit")
-
-    # Ensure dashboards directory exists
+    # Create dashboards directory if it doesn't exist
     dashboards_dir = os.path.join(base_dir, "dashboards")
     os.makedirs(dashboards_dir, exist_ok=True)
 
-    # Clean dashboard name for filename
-    clean_name = dashboard_name.lower().replace(" ", "_")
-    if not clean_name.endswith(".json"):
-        clean_name += ".json"
+    # Generate a filename based on the dashboard name
+    filename = re.sub(r"[^a-z0-9_]+", "_", dashboard_name.lower()) + ".json"
+    dashboard_path = os.path.join(dashboards_dir, filename)
 
-    # Save dashboard JSON
-    dashboard_path = os.path.join(dashboards_dir, clean_name)
+    # Save dashboard to file
     with open(dashboard_path, "w") as f:
         json.dump(dashboard, f, indent=2)
 
-    logger.info(f"Dashboard saved to {dashboard_path}")
+    # Try to find Grafana binary to import the dashboard
+    # binaries = get_binaries(base_dir)
+    # grafana_binary = find_grafana_binary(binaries)
 
-    # Try to configure Grafana provisioning
-    try:
-        # Find Grafana home directory
-        grafana_home = None
-        binaries = get_binaries(base_dir)
-        if binaries and "grafana" in binaries:
-            grafana_bin = find_grafana_binary(
-                base_dir, binaries["grafana"]["binary_name"], binaries["grafana"]["version"]
-            )
-            if grafana_bin:
-                grafana_home = os.path.dirname(os.path.dirname(grafana_bin))
-                logger.debug(f"Found Grafana home: {grafana_home}")
-
-        if grafana_home:
-            # Create provisioning directories if they don't exist
-            grafana_prov_dir = os.path.join(grafana_home, "conf", "provisioning")
-            grafana_dashboards_dir = os.path.join(grafana_prov_dir, "dashboards")
-            os.makedirs(grafana_dashboards_dir, exist_ok=True)
-
-            # Create dashboard provider configuration if it doesn't exist
-            provider_config_path = os.path.join(grafana_dashboards_dir, "lokikit.yaml")
-
-            # Check if provider config exists and needs updating
-            update_provider = True
-            if os.path.exists(provider_config_path):
-                try:
-                    with open(provider_config_path) as f:
-                        existing_config = yaml.safe_load(f)
-
-                    # Check if our dashboards path is already in the provider config
-                    if existing_config and "providers" in existing_config:
-                        for provider in existing_config["providers"]:
-                            if (
-                                provider.get("name") == "LokiKit"
-                                and provider.get("options", {}).get("path") == dashboards_dir
-                            ):
-                                update_provider = False
-                                break
-                except Exception as e:
-                    logger.warning(f"Error reading existing provider config: {e}")
-
-            if update_provider:
-                provider_config = {
-                    "apiVersion": 1,
-                    "providers": [
-                        {
-                            "name": "LokiKit",
-                            "folder": "LokiKit",
-                            "type": "file",
-                            "updateIntervalSeconds": 10,
-                            "allowUiUpdates": True,
-                            "options": {"path": dashboards_dir, "foldersFromFilesStructure": False},
-                        }
-                    ],
-                }
-                with open(provider_config_path, "w") as f:
-                    yaml.dump(provider_config, f, default_flow_style=False)
-                logger.info(f"Created dashboard provider configuration at {provider_config_path}")
-    except Exception as e:
-        logger.warning(f"Unable to setup Grafana dashboard provisioning: {e}")
-        logger.info("You will need to manually import the dashboard in Grafana.")
+    # if grafana_binary and os.path.exists(grafana_binary):
+    #     # TODO: Implement dashboard import using Grafana API
+    #     pass
 
     return dashboard_path

@@ -116,7 +116,17 @@ def ensure_dir(path):
 
 
 def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
-    """Update promtail config to add a new log path."""
+    """Update promtail config to add a new log path.
+
+    Args:
+        base_dir: Base directory for lokikit
+        log_path: Path to the log files to watch
+        job_name: Name for the job (generated if not provided)
+        labels: Dictionary of custom labels to apply
+
+    Returns:
+        bool: True if configuration was updated, False otherwise
+    """
     # Import logger here to avoid circular imports
     try:
         from lokikit.logger import get_logger
@@ -169,16 +179,51 @@ def update_promtail_config(base_dir, log_path, job_name=None, labels=None):
     # Convert log_path to absolute path if it's relative
     abs_log_path = os.path.expanduser(log_path)
 
-    # Check if path already exists in config
+    # Check if job already exists
+    job_exists = False
     path_exists = False
+    target_job = None
+
     for job in config["scrape_configs"]:
-        for static_config in job.get("static_configs", []):
-            labels_dict = static_config.get("labels", {})
-            if "__path__" in labels_dict and labels_dict["__path__"] == abs_log_path:
-                path_exists = True
-                logger.info(f"Path {abs_log_path} is already being watched.")
+        if job.get("job_name") == job_name:
+            job_exists = True
+            target_job = job
+
+            # Check if this path is already being watched by this job
+            for static_config in job.get("static_configs", []):
+                labels_dict = static_config.get("labels", {})
+                if "__path__" in labels_dict and labels_dict["__path__"] == abs_log_path:
+                    path_exists = True
+                    logger.info(f"Path {abs_log_path} is already being watched by job '{job_name}'.")
+                    break
+
+            # If job exists but path doesn't, we'll add the path to the existing job
+            if not path_exists:
                 break
 
+    # If the job exists but path doesn't, add the path to the existing job
+    if job_exists and not path_exists and target_job is not None:
+        # Create new static_config for this job
+        new_static_config = {"targets": ["localhost"], "labels": {"job": job_name, "__path__": abs_log_path}}
+
+        # Add custom labels
+        for key, value in labels.items():
+            new_static_config["labels"][key] = value
+
+        # Add to the existing job
+        if not target_job.get("static_configs"):
+            target_job["static_configs"] = []
+
+        target_job["static_configs"].append(new_static_config)
+
+        # Write updated config
+        with open(config_path, "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+
+        logger.info(f"Added {abs_log_path} to existing job '{job_name}' in Promtail configuration.")
+        return True
+
+    # If neither the job nor path exists, create a new job
     if not path_exists:
         # Create new job config
         new_job = {

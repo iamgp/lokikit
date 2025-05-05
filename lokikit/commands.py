@@ -39,6 +39,7 @@ from lokikit.process import (
     write_pid_file,
 )
 from lokikit.utils.dashboard_generator import create_dashboard, save_dashboard
+from lokikit.utils.job_manager import ensure_job_exists
 
 
 def setup_command(ctx):
@@ -721,6 +722,30 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
     json_fields: dict[str, set[str]] = {}
     sample_logs: list[dict[str, Any]] = []
 
+    # Helper function to extract fields recursively from nested dictionaries
+    def extract_fields_from_dict(data: dict, prefix: str = "") -> None:
+        for key, value in data.items():
+            field_name = f"{prefix}{key}" if prefix else key
+
+            # Handle the field
+            if field_name not in json_fields:
+                json_fields[field_name] = set()
+
+            value_type = type(value).__name__
+            json_fields[field_name].add(value_type)
+
+            # Recursively process nested dictionaries
+            if isinstance(value, dict):
+                extract_fields_from_dict(value, f"{field_name}.")
+
+            # Handle lists of dictionaries
+            elif isinstance(value, list) and value and isinstance(value[0], dict):
+                # Add the list type
+                json_fields[field_name].add("list")
+
+                # Sample the first item to get structure
+                extract_fields_from_dict(value[0], f"{field_name}[0].")
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[bold blue]Parsing logs..."),
@@ -749,13 +774,8 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
                                 if len(sample_logs) < 5:
                                     sample_logs.append(log_data)
 
-                                # Extract fields and types
-                                for key, value in log_data.items():
-                                    if key not in json_fields:
-                                        json_fields[key] = set()
-
-                                    value_type = type(value).__name__
-                                    json_fields[key].add(value_type)
+                                # Extract fields and types recursively
+                                extract_fields_from_dict(log_data)
                         except json.JSONDecodeError:
                             # Not JSON, skip
                             pass
@@ -784,12 +804,28 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         # Get sample values for this field
         sample_values = []
         for sample in sample_logs:
-            if field_name in sample:
-                sample_value = str(sample[field_name])
+            # Extract value from nested structure using field_name
+            field_parts = field_name.split(".")
+            value = sample
+
+            try:
+                for part in field_parts:
+                    # Handle array index notation like [0]
+                    if "[" in part and "]" in part:
+                        array_name, idx = part.split("[", 1)
+                        idx = int(idx.rstrip("]"))
+                        value = value[array_name][idx]
+                    else:
+                        value = value[part]
+
+                sample_value = str(value)
                 # Truncate long values
                 if len(sample_value) > 50:
                     sample_value = sample_value[:47] + "..."
                 sample_values.append(sample_value)
+            except (KeyError, IndexError, TypeError):
+                # Skip if field doesn't exist in this sample
+                pass
 
         field_table.add_row(
             field_name,
@@ -845,6 +881,9 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
 
             label_value = Prompt.ask(f"Value for '{label_key}'")
             labels[label_key] = label_value
+
+    # Check if the job exists and create it if needed
+    ensure_job_exists(base_dir, job_name)
 
     # Ask for dashboard name if not provided
     if not dashboard_name:
