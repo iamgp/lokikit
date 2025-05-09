@@ -652,7 +652,7 @@ def force_quit_command(ctx):
     logger.info("You can now start services with a clean state using: lokikit start")
 
 
-def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_files: int = 5, max_lines: int = 100):
+def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_files: int = 5, max_lines: int = 100) -> None:
     """Parse logs and interactively create Grafana dashboards.
 
     Args:
@@ -766,19 +766,34 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
                         if not line:
                             continue
 
+                        # DEBUG: Print line before parsing
+                        # print(f"DEBUG: Parsing line: {line[:150]}...")
+
                         # Try to parse as JSON
+                        log_data = None # Initialize
                         try:
                             log_data = json.loads(line)
-                            if isinstance(log_data, dict):
-                                # Add to sample logs
-                                if len(sample_logs) < 5:
-                                    sample_logs.append(log_data)
-
-                                # Extract fields and types recursively
-                                extract_fields_from_dict(log_data)
+                            # DEBUG: Print parsed data
+                            # if log_data:
+                            #     print(f"DEBUG: Parsed data type: {type(log_data)}")
                         except json.JSONDecodeError:
-                            # Not JSON, skip
-                            pass
+                            # Log if a line isn't valid JSON, but continue
+                            logger.debug(f"Skipping non-JSON line: {line[:100]}...")
+                            # log_data remains None
+                            pass # Continue to the next line
+                        except Exception as e:
+                             # Catch other potential errors during loading
+                             logger.warning(f"Error processing line: {line[:100]}... - {e}")
+                             pass # Continue to the next line
+
+                        # Ensure log_data is a dict before proceeding
+                        if log_data is not None and isinstance(log_data, dict):
+                            # Add to sample logs
+                            if len(sample_logs) < 5:
+                                sample_logs.append(log_data)
+
+                            # Extract fields and types recursively
+                            extract_fields_from_dict(log_data)
             except Exception as e:
                 logger.warning(f"Error reading file {file_path}: {e}")
 
@@ -846,6 +861,8 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
             "Fields to include",
             default="all",
         )
+        # DEBUG: Print field input
+        # print(f"DEBUG: Field input received: {field_input}")
 
         if field_input.lower().strip() == "all":
             selected_fields = list(json_fields.keys())
@@ -870,6 +887,8 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         "Job name for these logs",
         default=default_job_name,
     )
+    # DEBUG: Print job name input
+    # print(f"DEBUG: Job name received: {job_name}")
 
     # Ask for custom labels
     add_labels = Confirm.ask("Add custom labels for filtering?", default=False)
@@ -890,6 +909,8 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         dashboard_name = Prompt.ask(
             "Dashboard name", default=f"{job_name.capitalize()} Logs" if job_name else "Log Analysis Dashboard"
         )
+    # DEBUG: Print dashboard name input
+    # print(f"DEBUG: Dashboard name received/set: {dashboard_name}")
 
     # Ensure dashboard_name is a string for type checking
     dashboard_name = str(dashboard_name)
@@ -905,6 +926,8 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         task = progress.add_task("create", total=None)
 
         # Create the dashboard
+        # DEBUG: Print args passed to create_dashboard
+        # print(f"DEBUG: Calling create_dashboard with name='{dashboard_name}', job='{job_name}'")
         dashboard = create_dashboard(
             dashboard_name=dashboard_name,
             fields=selected_fields,
@@ -933,6 +956,8 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         label_list = tuple(f"{k}={v}" for k, v in labels.items())
 
         # Update promtail config
+        # DEBUG: Print args passed to watch_command
+        # print(f"DEBUG: Calling watch_command with job='{job_name}'")
         watch_command(ctx, log_path, job_name, label_list)
 
     console.print(f"[bold green]Dashboard created:[/] {dashboard_path}")

@@ -253,6 +253,60 @@ This dashboard displays logs from **{job_name or "all sources"}**
 
     # Add structured fields table
     if fields:
+        # Build the base query for the table: Selectors + JSON parser
+        # This allows Loki to return the full JSON structure
+        table_expr = f"{base_query} | json"
+
+        # Prepare field overrides for Grafana table configuration
+        # Hide default/internal Loki fields initially
+        field_overrides = [
+            {"matcher": {"id": "byName", "options": "Time"}, "properties": [{"id": "custom.width", "value": 200}]},
+            {"matcher": {"id": "byName", "options": "Line"}, "properties": [{"id": "custom.hidden", "value": True}]},
+            {"matcher": {"id": "byName", "options": "id"}, "properties": [{"id": "custom.hidden", "value": True}]},
+            {"matcher": {"id": "byName", "options": "tsNs"}, "properties": [{"id": "custom.hidden", "value": True}]},
+            {"matcher": {"id": "byName", "options": "labels"}, "properties": [{"id": "custom.hidden", "value": True}]},
+            {"matcher": {"id": "byName", "options": "job"}, "properties": [{"id": "custom.hidden", "value": True}]}, # Hide job if present
+        ]
+
+        # Configure selected fields
+        for field_name in fields:
+            # Basic override to ensure the field is potentially visible and set a default width
+            override = {
+                "matcher": {"id": "byName", "options": field_name},
+                "properties": [
+                    {"id": "custom.hidden", "value": False}, # Ensure it's not hidden by default
+                    {"id": "custom.width", "value": 150} # Default width
+                ]
+            }
+             # Add specific overrides for known fields like 'level'
+            if field_name == "level":
+                 override["properties"].extend([
+                    {"id": "color", "value": {"mode": "thresholds", "seriesBy": "last"}},
+                    {
+                        "id": "mappings",
+                        "value": [
+                            {
+                                "options": {
+                                    "ERROR": {"color": "red", "index": 2},
+                                    "WARN": {"color": "orange", "index": 1},
+                                    "WARNING": {"color": "orange", "index": 1},
+                                    "INFO": {"color": "blue", "index": 0},
+                                    "DEBUG": {"color": "dark-purple", "index": -1},
+                                    "TRACE": {"color": "purple", "index": -2},
+                                },
+                                "type": "value",
+                            }
+                        ],
+                    },
+                    {"id": "custom.width", "value": 100},
+                ])
+            elif field_name == "message":
+                 override["properties"].append({"id": "custom.width", "value": 300})
+            # Add more field-specific overrides here if needed (e.g., for numeric types, specific mappings)
+
+            field_overrides.append(override)
+
+
         fields_panel = {
             "id": 4,
             "title": "Structured Fields",
@@ -262,7 +316,7 @@ This dashboard displays logs from **{job_name or "all sources"}**
             "targets": [
                 {
                     "refId": "A",
-                    "expr": f'{base_query} | pattern "<_>\\\\| (?P<level>[A-Z]+)\\\\s+\\\\| (?P<message>[^|]+) \\\\| (?P<details>\\\\{{.*\\\\}})" | line_format "{{.level}} {{.message}} {{.details}}"',
+                    "expr": table_expr, # Use the dynamic query
                     "queryType": "range",
                 }
             ],
@@ -272,95 +326,22 @@ This dashboard displays logs from **{job_name or "all sources"}**
                     "custom": {
                         "align": "auto",
                         "cellOptions": {"type": "auto"},
-                        "filterable": True,
+                        "filterable": True, # Allow column filtering
                         "inspect": False,
                     },
                     "mappings": [],
                     "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
                 },
-                "overrides": [
-                    {
-                        "matcher": {"id": "byName", "options": "Time"},
-                        "properties": [{"id": "custom.width", "value": 200}],
-                    },
-                    {
-                        "matcher": {"id": "byName", "options": "level"},
-                        "properties": [
-                            {"id": "color", "value": {"mode": "thresholds", "seriesBy": "last"}},
-                            {
-                                "id": "mappings",
-                                "value": [
-                                    {
-                                        "options": {
-                                            "ERROR": {"color": "red", "index": 2},
-                                            "INFO": {"color": "blue", "index": 0},
-                                            "WARN": {"color": "orange", "index": 1},
-                                        },
-                                        "type": "value",
-                                    }
-                                ],
-                            },
-                            {"id": "custom.width", "value": 100},
-                        ],
-                    },
-                    {
-                        "matcher": {"id": "byName", "options": "message"},
-                        "properties": [{"id": "custom.width", "value": 300}],
-                    },
-                    {
-                        "matcher": {"id": "byName", "options": "job"},
-                        "properties": [{"id": "custom.hidden", "value": True}],
-                    },
-                    {
-                        "matcher": {"id": "byName", "options": "Line"},
-                        "properties": [{"id": "custom.hidden", "value": True}],
-                    },
-                    {
-                        "matcher": {"id": "byName", "options": "id"},
-                        "properties": [{"id": "custom.hidden", "value": True}],
-                    },
-                    {
-                        "matcher": {"id": "byName", "options": "tsNs"},
-                        "properties": [{"id": "custom.hidden", "value": True}],
-                    },
-                    {
-                        "matcher": {"id": "byName", "options": "labels"},
-                        "properties": [{"id": "custom.hidden", "value": True}],
-                    },
-                ],
+                "overrides": field_overrides, # Use the dynamically generated overrides
             },
             "options": {
                 "footer": {"enablePagination": True, "fields": "", "reducer": ["sum"], "show": False},
                 "showHeader": True,
-                "sortBy": [{"desc": True, "displayName": "Time"}],
+                "sortBy": [{"desc": True, "displayName": "Time"}], # Sort by time by default
+                # Removed customHeight option as it's often better automatic
             },
-            "transformations": [
-                {
-                    "id": "extractFields",
-                    "options": {
-                        "format": "json",
-                        "source": "details",
-                    },
-                },
-                {
-                    "id": "organize",
-                    "options": {
-                        "excludeByName": {
-                            "Line": True,
-                            "id": True,
-                            "job": True,
-                            "labels": True,
-                            "tsNs": True,
-                        },
-                        "indexByName": {
-                            "Time": 0,
-                            "level": 1,
-                            "message": 2,
-                        },
-                        "renameByName": {},
-                    },
-                },
-            ],
+            # Remove transformations, rely on Loki + Grafana native field display
+            "transformations": [],
         }
         dashboard["panels"].append(fields_panel)
         y_pos += 8
@@ -674,8 +655,10 @@ def save_dashboard(dashboard: dict, base_dir: str, dashboard_name: str) -> str:
     dashboards_dir = os.path.join(base_dir, "dashboards")
     os.makedirs(dashboards_dir, exist_ok=True)
 
-    # Generate a filename based on the dashboard name
-    filename = re.sub(r"[^a-z0-9_]+", "_", dashboard_name.lower()) + ".json"
+    # Generate a filename based on the provided dashboard_name
+    # Ensure dashboard_name is a string and handle potential None
+    safe_dashboard_name = str(dashboard_name) if dashboard_name else "lokikit_dashboard"
+    filename = re.sub(r"[^a-z0-9_]+", "_", safe_dashboard_name.lower()) + ".json"
     dashboard_path = os.path.join(dashboards_dir, filename)
 
     # Save dashboard to file
