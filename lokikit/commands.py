@@ -40,6 +40,12 @@ from lokikit.process import (
 )
 from lokikit.utils.dashboard_generator import create_dashboard, save_dashboard
 from lokikit.utils.job_manager import ensure_job_exists
+from lokikit.utils.log_analyzer import (
+    analyze_log_format,
+    extract_json_fields,
+    recommend_visualizations,
+    generate_logql_query
+)
 
 
 def setup_command(ctx):
@@ -652,7 +658,7 @@ def force_quit_command(ctx):
     logger.info("You can now start services with a clean state using: lokikit start")
 
 
-def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_files: int = 5, max_lines: int = 100) -> None:
+def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_files: int = 5, max_lines: int = 500) -> None:
     """Parse logs and interactively create Grafana dashboards.
 
     Args:
@@ -662,7 +668,23 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         max_files: Maximum number of log files to sample
         max_lines: Maximum number of lines to sample per file
     """
-    print(f"Starting log parse command on directory: {directory}")
+    import glob
+    import json
+    import os
+    from rich.console import Console
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.prompt import Confirm, Prompt
+    from rich.table import Table
+
+    from lokikit.utils.log_analyzer import (
+        analyze_log_format,
+        extract_json_fields,
+        recommend_visualizations
+    )
+    from lokikit.utils.dashboard_generator import create_dashboard, save_dashboard
+    from lokikit.utils.job_manager import ensure_job_exists
+    from lokikit.process import check_services_running, read_pid_file
+
     base_dir = ctx.obj["BASE_DIR"]
     logger = get_logger()
     console = Console()
@@ -718,33 +740,10 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
     # Sample log files to extract potential fields
     console.print("[bold]Analyzing log contents...[/]")
 
-    # Dictionary to store potential JSON fields and their types
-    json_fields: dict[str, set[str]] = {}
-    sample_logs: list[dict[str, Any]] = []
-
-    # Helper function to extract fields recursively from nested dictionaries
-    def extract_fields_from_dict(data: dict, prefix: str = "") -> None:
-        for key, value in data.items():
-            field_name = f"{prefix}{key}" if prefix else key
-
-            # Handle the field
-            if field_name not in json_fields:
-                json_fields[field_name] = set()
-
-            value_type = type(value).__name__
-            json_fields[field_name].add(value_type)
-
-            # Recursively process nested dictionaries
-            if isinstance(value, dict):
-                extract_fields_from_dict(value, f"{field_name}.")
-
-            # Handle lists of dictionaries
-            elif isinstance(value, list) and value and isinstance(value[0], dict):
-                # Add the list type
-                json_fields[field_name].add("list")
-
-                # Sample the first item to get structure
-                extract_fields_from_dict(value[0], f"{field_name}[0].")
+    # Storage for all samples and format analysis
+    all_samples = []
+    json_samples = []
+    log_format_results = {}
 
     with Progress(
         SpinnerColumn(),
@@ -758,122 +757,180 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
 
             try:
                 with open(file_path) as f:
+                    lines = []
                     for i, line in enumerate(f):
                         if i >= max_lines:
                             break
+                        lines.append(line.strip())
 
-                        line = line.strip()
-                        if not line:
-                            continue
+                    if not lines:
+                        continue
 
-                        # DEBUG: Print line before parsing
-                        # print(f"DEBUG: Parsing line: {line[:150]}...")
+                    # Analyze format
+                    log_format_results = analyze_log_format(lines)
 
-                        # Try to parse as JSON
-                        log_data = None # Initialize
+                    # Process each line
+                    for line in lines:
+                        all_samples.append(line)
+
+                        # Try to parse JSON
                         try:
                             log_data = json.loads(line)
-                            # DEBUG: Print parsed data
-                            # if log_data:
-                            #     print(f"DEBUG: Parsed data type: {type(log_data)}")
-                        except json.JSONDecodeError:
-                            # Log if a line isn't valid JSON, but continue
-                            logger.debug(f"Skipping non-JSON line: {line[:100]}...")
-                            # log_data remains None
-                            pass # Continue to the next line
-                        except Exception as e:
-                             # Catch other potential errors during loading
-                             logger.warning(f"Error processing line: {line[:100]}... - {e}")
-                             pass # Continue to the next line
-
-                        # Ensure log_data is a dict before proceeding
-                        if log_data is not None and isinstance(log_data, dict):
-                            # Add to sample logs
-                            if len(sample_logs) < 5:
-                                sample_logs.append(log_data)
-
-                            # Extract fields and types recursively
-                            extract_fields_from_dict(log_data)
+                            if isinstance(log_data, dict):
+                                json_samples.append(log_data)
+                        except (json.JSONDecodeError, Exception):
+                            # Non-JSON line, already added to all_samples
+                            pass
             except Exception as e:
                 logger.warning(f"Error reading file {file_path}: {e}")
 
             progress.update(task, advance=1)
 
-    if not json_fields:
-        logger.warning("No JSON logs found in the sampled files.")
-        console.print("[bold yellow]Warning:[/] No JSON logs found in the sampled files.")
+    # Process our samples
+    field_metadata = {}
+    dominant_format = "unstructured"
+    detected_patterns = []
 
-        if not Confirm.ask("Continue with creating a basic log dashboard?"):
-            console.print("[yellow]Operation cancelled.[/]")
-            return
+    if log_format_results:
+        dominant_format = log_format_results.get("dominant_format", "unstructured")
+        detected_patterns = log_format_results.get("detected_patterns", [])
 
-    # Display discovered fields
-    console.print("[bold]Discovered JSON fields:[/]")
+        console.print(f"[bold]Log format analysis:[/] {len(all_samples)} lines")
 
-    field_table = Table(show_header=True, header_style="bold blue")
-    field_table.add_column("Field Name")
-    field_table.add_column("Types")
-    field_table.add_column("Sample Values")
+        format_table = Table(show_header=True, header_style="bold blue")
+        format_table.add_column("Format")
+        format_table.add_column("Percentage")
+        format_table.add_column("Count")
 
-    for field_name, types in sorted(json_fields.items()):
-        # Get sample values for this field
-        sample_values = []
-        for sample in sample_logs:
-            # Extract value from nested structure using field_name
-            field_parts = field_name.split(".")
-            value = sample
+        total_lines = log_format_results.get("total_lines", 0)
+        if total_lines > 0:
+            formats = log_format_results.get("formats", {})
+            for fmt, count in formats.items():
+                if count > 0:
+                    percentage = (count / total_lines) * 100
+                    format_table.add_row(
+                        fmt,
+                        f"{percentage:.1f}%",
+                        str(count)
+                    )
 
-            try:
-                for part in field_parts:
-                    # Handle array index notation like [0]
-                    if "[" in part and "]" in part:
-                        array_name, idx = part.split("[", 1)
-                        idx = int(idx.rstrip("]"))
-                        value = value[array_name][idx]
-                    else:
-                        value = value[part]
+        console.print(format_table)
 
-                sample_value = str(value)
-                # Truncate long values
-                if len(sample_value) > 50:
-                    sample_value = sample_value[:47] + "..."
-                sample_values.append(sample_value)
-            except (KeyError, IndexError, TypeError):
-                # Skip if field doesn't exist in this sample
-                pass
+    recommendations = []
 
-        field_table.add_row(
-            field_name,
-            ", ".join(types),
-            "\n".join(sample_values[:2]) if sample_values else "",
-        )
+    # Process JSON if we have enough samples
+    if json_samples and (dominant_format == "json" or len(json_samples) > len(all_samples) * 0.3):
+        field_metadata = extract_json_fields(json_samples)
 
-    console.print(field_table)
+        # Add format detection result to field metadata for dashboard generator
+        field_metadata["format_detected"] = dominant_format
+
+        # Generate visualization recommendations
+        recommendations = recommend_visualizations(field_metadata)
+
+        # Display discovered fields
+        console.print("[bold]Discovered JSON fields:[/]")
+
+        field_table = Table(show_header=True, header_style="bold blue")
+        field_table.add_column("Field Name")
+        field_table.add_column("Type")
+        field_table.add_column("Cardinality")
+        field_table.add_column("Sample Values")
+
+        for field_name, metadata in sorted(field_metadata.items()):
+            # Skip the format_detected metadata entry
+            if field_name == "format_detected":
+                continue
+
+            field_type = metadata.get("type", "unknown")
+            cardinality = metadata.get("cardinality", 0)
+            cardinality_class = metadata.get("cardinality_class", "unknown")
+            sample_values = metadata.get("sample_values", [])
+
+            # Convert sample values to readable strings and limit length
+            sample_str = []
+            for val in sample_values[:3]:
+                val_str = str(val)
+                if len(val_str) > 30:
+                    val_str = val_str[:27] + "..."
+                sample_str.append(val_str)
+
+            field_table.add_row(
+                field_name,
+                field_type.capitalize(),
+                f"{cardinality} ({cardinality_class})",
+                ", ".join(sample_str)
+            )
+
+        console.print(field_table)
+
+    # Display pattern info for non-JSON logs
+    elif detected_patterns:
+        console.print("[bold]Detected log patterns:[/]")
+
+        pattern_table = Table(show_header=True, header_style="bold blue")
+        pattern_table.add_column("Description")
+        pattern_table.add_column("Example")
+
+        for pattern in detected_patterns:
+            desc = pattern.get("description", "Unknown")
+            regex = pattern.get("regex", "")
+            sample_pos = pattern.get("sample_position", (0, 0))
+
+            # Extract example from first log line
+            example = ""
+            if all_samples and len(all_samples[0]) >= sample_pos[1]:
+                example = all_samples[0][sample_pos[0]:sample_pos[1]]
+
+            pattern_table.add_row(desc, example)
+
+        console.print(pattern_table)
 
     # Interactive field selection
     selected_fields = []
 
-    if json_fields:
+    if field_metadata:
+        # Remove format_detected from field_metadata before selection
+        selectable_fields = {k: v for k, v in field_metadata.items() if k != "format_detected"}
+
+        # Show recommendations if we have them
+        if recommendations:
+            console.print("[bold]Recommended visualizations:[/]")
+
+            rec_table = Table(show_header=True, header_style="bold blue")
+            rec_table.add_column("Field")
+            rec_table.add_column("Visualization Type")
+            rec_table.add_column("Description")
+
+            for rec in recommendations:
+                rec_table.add_row(
+                    rec.get("field", ""),
+                    rec.get("panel_type", "").replace("_", " ").title(),
+                    rec.get("description", "")
+                )
+
+            console.print(rec_table)
+
         console.print("[bold]Select fields to include in the dashboard:[/]")
-        console.print("Enter field names separated by commas, or 'all' for all fields")
+        console.print("Enter field names separated by commas, or 'all' for all fields, or 'recommended' for recommended fields")
 
         field_input = Prompt.ask(
             "Fields to include",
-            default="all",
+            default="recommended" if recommendations else "all",
         )
-        # DEBUG: Print field input
-        # print(f"DEBUG: Field input received: {field_input}")
 
         if field_input.lower().strip() == "all":
-            selected_fields = list(json_fields.keys())
+            selected_fields = list(selectable_fields.keys())
+        elif field_input.lower().strip() == "recommended" and recommendations:
+            selected_fields = [rec["field"] for rec in recommendations]
         else:
             selected_fields = [field.strip() for field in field_input.split(",") if field.strip()]
 
             # Validate fields
-            invalid_fields = [field for field in selected_fields if field not in json_fields]
+            invalid_fields = [field for field in selected_fields if field not in selectable_fields]
             if invalid_fields:
                 console.print(f"[yellow]Warning: The following fields were not found: {', '.join(invalid_fields)}[/]")
-                selected_fields = [field for field in selected_fields if field in json_fields]
+                selected_fields = [field for field in selected_fields if field in selectable_fields]
 
     # Determine job name (from promtail config)
     job_name = None
@@ -887,8 +944,6 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         "Job name for these logs",
         default=default_job_name,
     )
-    # DEBUG: Print job name input
-    # print(f"DEBUG: Job name received: {job_name}")
 
     # Ask for custom labels
     add_labels = Confirm.ask("Add custom labels for filtering?", default=False)
@@ -909,8 +964,6 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         dashboard_name = Prompt.ask(
             "Dashboard name", default=f"{job_name.capitalize()} Logs" if job_name else "Log Analysis Dashboard"
         )
-    # DEBUG: Print dashboard name input
-    # print(f"DEBUG: Dashboard name received/set: {dashboard_name}")
 
     # Ensure dashboard_name is a string for type checking
     dashboard_name = str(dashboard_name)
@@ -925,15 +978,13 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
     ) as progress:
         task = progress.add_task("create", total=None)
 
-        # Create the dashboard
-        # DEBUG: Print args passed to create_dashboard
-        # print(f"DEBUG: Calling create_dashboard with name='{dashboard_name}', job='{job_name}'")
+        # Create the dashboard with enhanced metadata
         dashboard = create_dashboard(
             dashboard_name=dashboard_name,
             fields=selected_fields,
             job_name=job_name,
             labels=labels,
-            field_types=json_fields,
+            field_types=field_metadata,
         )
 
         # Save the dashboard
@@ -956,8 +1007,6 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         label_list = tuple(f"{k}={v}" for k, v in labels.items())
 
         # Update promtail config
-        # DEBUG: Print args passed to watch_command
-        # print(f"DEBUG: Calling watch_command with job='{job_name}'")
         watch_command(ctx, log_path, job_name, label_list)
 
     console.print(f"[bold green]Dashboard created:[/] {dashboard_path}")

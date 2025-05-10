@@ -151,3 +151,37 @@ def get_job_paths(base_dir: str, job_name: str) -> list[str]:
                         paths.append(static_config["labels"]["__path__"])
 
     return paths
+
+
+def get_job_names(base_dir: str) -> list[str]:
+    """Get all job names from Promtail configuration.
+
+    Args:
+        base_dir: LokiKit base directory
+
+    Returns:
+        List of job names
+    """
+    # Path to promtail config
+    config_path = os.path.join(base_dir, "promtail-config.yaml")
+
+    # Check if config file exists
+    if not os.path.exists(config_path):
+        return []
+
+    # Read existing config
+    with open(config_path, 'r') as f:
+        try:
+            config = yaml.safe_load(f)
+        except yaml.YAMLError:
+            return []
+
+    # Extract job names
+    job_names = []
+    if "scrape_configs" in config:
+        for job_config in config["scrape_configs"]:
+            job_name = job_config.get("job_name")
+            if job_name:
+                job_names.append(job_name)
+
+    return job_names
