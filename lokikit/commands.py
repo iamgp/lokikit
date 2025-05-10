@@ -8,7 +8,6 @@ import signal
 import subprocess
 import sys
 import time
-from typing import Any
 
 import yaml
 from rich.console import Console
@@ -44,7 +43,6 @@ from lokikit.utils.log_analyzer import (
     analyze_log_format,
     extract_json_fields,
     recommend_visualizations,
-    generate_logql_query
 )
 
 
@@ -668,21 +666,8 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
         max_files: Maximum number of log files to sample
         max_lines: Maximum number of lines to sample per file
     """
-    import glob
-    import json
     import os
-    from rich.console import Console
-    from rich.progress import Progress, SpinnerColumn, TextColumn
-    from rich.prompt import Confirm, Prompt
-    from rich.table import Table
 
-    from lokikit.utils.log_analyzer import (
-        analyze_log_format,
-        extract_json_fields,
-        recommend_visualizations
-    )
-    from lokikit.utils.dashboard_generator import create_dashboard, save_dashboard
-    from lokikit.utils.job_manager import ensure_job_exists
     from lokikit.process import check_services_running, read_pid_file
 
     base_dir = ctx.obj["BASE_DIR"]
@@ -874,7 +859,7 @@ def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_fi
 
         for pattern in detected_patterns:
             desc = pattern.get("description", "Unknown")
-            regex = pattern.get("regex", "")
+            pattern.get("regex", "")
             sample_pos = pattern.get("sample_position", (0, 0))
 
             # Extract example from first log line

@@ -7,8 +7,8 @@ from lokikit.utils.job_manager import ensure_job_exists, get_job_names
 from lokikit.utils.log_analyzer import (
     analyze_log_format,
     extract_json_fields,
+    generate_logql_query,
     recommend_visualizations,
-    generate_logql_query
 )
 
 __all__ = [

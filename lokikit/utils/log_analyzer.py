@@ -136,7 +136,7 @@ def detect_common_patterns(lines: list[str]) -> list[dict]:
         }
         patterns.append(pattern)
 
-    if level_positions and len(set(p[0] for p in level_positions)) <= 3:
+    if level_positions and len({p[0] for p in level_positions}) <= 3:
         pattern = {
             "description": "Log level",
             "regex": r'(?P<level>(INFO|DEBUG|WARN|ERROR|TRACE))',
@@ -183,7 +183,7 @@ def extract_fields_from_dict(data: dict, prefix: str, fields: dict[str, list]) -
             fields[field_name] = []
 
         # Store the value unless it's a complex type
-        if not isinstance(value, (dict, list)):
+        if not isinstance(value, dict | list):
             fields[field_name].append(value)
 
         # Recursively process nested dictionaries
@@ -228,7 +228,7 @@ def analyze_field_values(values: list) -> dict[str, Any]:
         unique_values.add(str(value))
 
         # Collect numeric values for additional analysis
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             numeric_values.append(value)
 
     # Determine predominant type

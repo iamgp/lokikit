@@ -34,7 +34,7 @@ src = ["lokikit"]
 
 [tool.ruff.lint]
 select = ["E", "F", "B", "I", "N", "W", "UP", "A", "C4"]
-ignore = ["PLR2004"]
+ignore = ["PLR2004", "E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]

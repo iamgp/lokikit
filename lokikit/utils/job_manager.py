@@ -170,7 +170,7 @@ def get_job_names(base_dir: str) -> list[str]:
         return []
 
     # Read existing config
-    with open(config_path, 'r') as f:
+    with open(config_path) as f:
         try:
             config = yaml.safe_load(f)
         except yaml.YAMLError:
