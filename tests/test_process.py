@@ -134,7 +134,13 @@ def test_check_services_running_all_running(mock_run, mock_kill):
     pids = {"loki": 1000, "promtail": 2000, "grafana": 3000}
     result = check_services_running(pids)
 
-    assert result is True
+    # Result should be a dictionary with all values True
+    assert isinstance(result, dict)
+    assert result["loki"] is True
+    assert result["promtail"] is True
+    assert result["grafana"] is True
+    assert all(result.values())  # All should be True
+
     # Should have called kill 3 times with signal 0
     assert mock_kill.call_count == 3
     mock_run.assert_not_called()  # Shouldn't need to use pgrep
@@ -154,7 +160,13 @@ def test_check_services_running_none_running(mock_run, mock_kill):
     pids = {"loki": 1000, "promtail": 2000, "grafana": 3000}
     result = check_services_running(pids)
 
-    assert result is False
+    # Result should be a dictionary with all values False
+    assert isinstance(result, dict)
+    assert result["loki"] is False
+    assert result["promtail"] is False
+    assert result["grafana"] is False
+    assert not any(result.values())  # All should be False
+
     assert mock_kill.call_count == 3
     assert mock_run.call_count == 3  # Should try pgrep for each service
 
@@ -182,7 +194,14 @@ def test_check_services_running_some_found_by_pattern(mock_run, mock_kill):
     pids = {"loki": 1000, "promtail": 2000, "grafana": 3000}
     result = check_services_running(pids)
 
-    assert result is False  # Not all services running
+    # Result should be a dictionary with mixed values
+    assert isinstance(result, dict)
+    assert result["loki"] is True  # Only loki was found
+    assert result["promtail"] is False
+    assert result["grafana"] is False
+    assert any(result.values())  # At least one should be True
+    assert not all(result.values())  # But not all are True
+
     assert mock_kill.call_count == 3
     assert mock_run.call_count == 3
 

@@ -1,5 +1,7 @@
 """Command implementations for lokikit CLI."""
 
+import glob
+import json
 import os
 import shutil
 import signal
@@ -8,6 +10,10 @@ import sys
 import time
 
 import yaml
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Confirm, Prompt
+from rich.table import Table
 
 from lokikit.config import (
     LOKI_CONFIG_TEMPLATE,
@@ -30,6 +36,13 @@ from lokikit.process import (
     stop_services,
     wait_for_services,
     write_pid_file,
+)
+from lokikit.utils.dashboard_generator import create_dashboard, save_dashboard
+from lokikit.utils.job_manager import ensure_job_exists
+from lokikit.utils.log_analyzer import (
+    analyze_log_format,
+    extract_json_fields,
+    recommend_visualizations,
 )
 
 
@@ -641,3 +654,359 @@ def force_quit_command(ctx):
     # Step 3: Create a fresh state
     logger.info("All lokikit processes have been terminated")
     logger.info("You can now start services with a clean state using: lokikit start")
+
+
+def parse_command(ctx, directory: str, dashboard_name: str | None = None, max_files: int = 5, max_lines: int = 500) -> None:
+    """Parse logs and interactively create Grafana dashboards.
+
+    Args:
+        ctx: Click context
+        directory: Directory containing log files to parse
+        dashboard_name: Name for the generated dashboard
+        max_files: Maximum number of log files to sample
+        max_lines: Maximum number of lines to sample per file
+    """
+    import os
+
+    from lokikit.process import check_services_running, read_pid_file
+
+    base_dir = ctx.obj["BASE_DIR"]
+    logger = get_logger()
+    console = Console()
+
+    # Check if directory exists
+    if not os.path.isdir(directory):
+        logger.error(f"Directory does not exist: {directory}")
+        console.print(f"[bold red]Directory does not exist:[/] {directory}")
+        return
+
+    # Check if Grafana is running
+    pids = read_pid_file(base_dir)
+    grafana_running = False
+    promtail_running = False
+
+    if pids:
+        services_status = check_services_running(pids)
+        if isinstance(services_status, dict):
+            grafana_running = services_status.get("grafana", False)
+            promtail_running = services_status.get("promtail", False)
+        else:
+            # When check_services_running returns a boolean
+            grafana_running = services_status
+            promtail_running = services_status
+
+    if not grafana_running:
+        logger.warning("Grafana is not running. Dashboard will be saved but not loaded.")
+        console.print("[bold yellow]Warning:[/] Grafana is not running. Dashboard will be saved but not loaded.")
+
+    # Find all log files in the directory
+    console.print(f"[bold]Searching for log files in:[/] {directory}")
+    log_files = []
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Scanning log files..."),
+        console=console,
+    ) as progress:
+        progress.add_task("scan", total=None)
+        for ext in ["log", "json", "txt"]:
+            log_files.extend(glob.glob(f"{directory}/**/*.{ext}", recursive=True))
+
+        # Limit the number of files
+        log_files = log_files[:max_files]
+
+    if not log_files:
+        logger.error(f"No log files found in: {directory}")
+        console.print(f"[bold red]No log files found in:[/] {directory}")
+        return
+
+    console.print(f"[green]Found {len(log_files)} log files[/]")
+
+    # Sample log files to extract potential fields
+    console.print("[bold]Analyzing log contents...[/]")
+
+    # Storage for all samples and format analysis
+    all_samples = []
+    json_samples = []
+    log_format_results = {}
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Parsing logs..."),
+        console=console,
+    ) as progress:
+        task = progress.add_task("parse", total=len(log_files))
+
+        for file_path in log_files:
+            progress.update(task, description=f"[bold blue]Parsing[/] {os.path.basename(file_path)}")
+
+            try:
+                with open(file_path) as f:
+                    lines = []
+                    for i, line in enumerate(f):
+                        if i >= max_lines:
+                            break
+                        lines.append(line.strip())
+
+                    if not lines:
+                        continue
+
+                    # Analyze format
+                    log_format_results = analyze_log_format(lines)
+
+                    # Process each line
+                    for line in lines:
+                        all_samples.append(line)
+
+                        # Try to parse JSON
+                        try:
+                            log_data = json.loads(line)
+                            if isinstance(log_data, dict):
+                                json_samples.append(log_data)
+                        except (json.JSONDecodeError, Exception):
+                            # Non-JSON line, already added to all_samples
+                            pass
+            except Exception as e:
+                logger.warning(f"Error reading file {file_path}: {e}")
+
+            progress.update(task, advance=1)
+
+    # Process our samples
+    field_metadata = {}
+    dominant_format = "unstructured"
+    detected_patterns = []
+
+    if log_format_results:
+        dominant_format = log_format_results.get("dominant_format", "unstructured")
+        detected_patterns = log_format_results.get("detected_patterns", [])
+
+        console.print(f"[bold]Log format analysis:[/] {len(all_samples)} lines")
+
+        format_table = Table(show_header=True, header_style="bold blue")
+        format_table.add_column("Format")
+        format_table.add_column("Percentage")
+        format_table.add_column("Count")
+
+        total_lines = log_format_results.get("total_lines", 0)
+        if total_lines > 0:
+            formats = log_format_results.get("formats", {})
+            for fmt, count in formats.items():
+                if count > 0:
+                    percentage = (count / total_lines) * 100
+                    format_table.add_row(
+                        fmt,
+                        f"{percentage:.1f}%",
+                        str(count)
+                    )
+
+        console.print(format_table)
+
+    recommendations = []
+
+    # Process JSON if we have enough samples
+    if json_samples and (dominant_format == "json" or len(json_samples) > len(all_samples) * 0.3):
+        field_metadata = extract_json_fields(json_samples)
+
+        # Add format detection result to field metadata for dashboard generator
+        field_metadata["format_detected"] = dominant_format
+
+        # Generate visualization recommendations
+        recommendations = recommend_visualizations(field_metadata)
+
+        # Display discovered fields
+        console.print("[bold]Discovered JSON fields:[/]")
+
+        field_table = Table(show_header=True, header_style="bold blue")
+        field_table.add_column("Field Name")
+        field_table.add_column("Type")
+        field_table.add_column("Cardinality")
+        field_table.add_column("Sample Values")
+
+        for field_name, metadata in sorted(field_metadata.items()):
+            # Skip the format_detected metadata entry
+            if field_name == "format_detected":
+                continue
+
+            field_type = metadata.get("type", "unknown")
+            cardinality = metadata.get("cardinality", 0)
+            cardinality_class = metadata.get("cardinality_class", "unknown")
+            sample_values = metadata.get("sample_values", [])
+
+            # Convert sample values to readable strings and limit length
+            sample_str = []
+            for val in sample_values[:3]:
+                val_str = str(val)
+                if len(val_str) > 30:
+                    val_str = val_str[:27] + "..."
+                sample_str.append(val_str)
+
+            field_table.add_row(
+                field_name,
+                field_type.capitalize(),
+                f"{cardinality} ({cardinality_class})",
+                ", ".join(sample_str)
+            )
+
+        console.print(field_table)
+
+    # Display pattern info for non-JSON logs
+    elif detected_patterns:
+        console.print("[bold]Detected log patterns:[/]")
+
+        pattern_table = Table(show_header=True, header_style="bold blue")
+        pattern_table.add_column("Description")
+        pattern_table.add_column("Example")
+
+        for pattern in detected_patterns:
+            desc = pattern.get("description", "Unknown")
+            pattern.get("regex", "")
+            sample_pos = pattern.get("sample_position", (0, 0))
+
+            # Extract example from first log line
+            example = ""
+            if all_samples and len(all_samples[0]) >= sample_pos[1]:
+                example = all_samples[0][sample_pos[0]:sample_pos[1]]
+
+            pattern_table.add_row(desc, example)
+
+        console.print(pattern_table)
+
+    # Interactive field selection
+    selected_fields = []
+
+    if field_metadata:
+        # Remove format_detected from field_metadata before selection
+        selectable_fields = {k: v for k, v in field_metadata.items() if k != "format_detected"}
+
+        # Show recommendations if we have them
+        if recommendations:
+            console.print("[bold]Recommended visualizations:[/]")
+
+            rec_table = Table(show_header=True, header_style="bold blue")
+            rec_table.add_column("Field")
+            rec_table.add_column("Visualization Type")
+            rec_table.add_column("Description")
+
+            for rec in recommendations:
+                rec_table.add_row(
+                    rec.get("field", ""),
+                    rec.get("panel_type", "").replace("_", " ").title(),
+                    rec.get("description", "")
+                )
+
+            console.print(rec_table)
+
+        console.print("[bold]Select fields to include in the dashboard:[/]")
+        console.print("Enter field names separated by commas, or 'all' for all fields, or 'recommended' for recommended fields")
+
+        field_input = Prompt.ask(
+            "Fields to include",
+            default="recommended" if recommendations else "all",
+        )
+
+        if field_input.lower().strip() == "all":
+            selected_fields = list(selectable_fields.keys())
+        elif field_input.lower().strip() == "recommended" and recommendations:
+            selected_fields = [rec["field"] for rec in recommendations]
+        else:
+            selected_fields = [field.strip() for field in field_input.split(",") if field.strip()]
+
+            # Validate fields
+            invalid_fields = [field for field in selected_fields if field not in selectable_fields]
+            if invalid_fields:
+                console.print(f"[yellow]Warning: The following fields were not found: {', '.join(invalid_fields)}[/]")
+                selected_fields = [field for field in selected_fields if field in selectable_fields]
+
+    # Determine job name (from promtail config)
+    job_name = None
+    labels = {}
+
+    # Get base directory name as default job name
+    default_job_name = os.path.basename(os.path.abspath(directory))
+
+    # Ask for job name
+    job_name = Prompt.ask(
+        "Job name for these logs",
+        default=default_job_name,
+    )
+
+    # Ask for custom labels
+    add_labels = Confirm.ask("Add custom labels for filtering?", default=False)
+    if add_labels:
+        while True:
+            label_key = Prompt.ask("Label key (or empty to finish)")
+            if not label_key:
+                break
+
+            label_value = Prompt.ask(f"Value for '{label_key}'")
+            labels[label_key] = label_value
+
+    # Check if the job exists and create it if needed
+    ensure_job_exists(base_dir, job_name)
+
+    # Ask for dashboard name if not provided
+    if not dashboard_name:
+        dashboard_name = Prompt.ask(
+            "Dashboard name", default=f"{job_name.capitalize()} Logs" if job_name else "Log Analysis Dashboard"
+        )
+
+    # Ensure dashboard_name is a string for type checking
+    dashboard_name = str(dashboard_name)
+
+    # Generate dashboard
+    console.print("[bold]Generating dashboard...[/]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Creating dashboard..."),
+        console=console,
+    ) as progress:
+        task = progress.add_task("create", total=None)
+
+        # Create the dashboard with enhanced metadata
+        dashboard = create_dashboard(
+            dashboard_name=dashboard_name,
+            fields=selected_fields,
+            job_name=job_name,
+            labels=labels,
+            field_types=field_metadata,
+        )
+
+        # Save the dashboard
+        dashboard_path = save_dashboard(dashboard, base_dir, dashboard_name)
+
+    # Add the log path to promtail configuration if not already watching
+    console.print("[bold]Updating Promtail configuration...[/]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Updating Promtail config..."),
+        console=console,
+    ) as progress:
+        task = progress.add_task("update", total=None)
+
+        # Get all files in directory with wildcards
+        log_path = os.path.join(directory, "**", "*.log")
+
+        # Create label list for watch command format
+        label_list = tuple(f"{k}={v}" for k, v in labels.items())
+
+        # Update promtail config
+        watch_command(ctx, log_path, job_name, label_list)
+
+    console.print(f"[bold green]Dashboard created:[/] {dashboard_path}")
+    console.print(f"[bold]Job name:[/] {job_name}")
+
+    # Display restart instructions if Grafana is running
+    if grafana_running:
+        grafana_url = f"http://{ctx.obj['HOST']}:{ctx.obj['GRAFANA_PORT']}"
+        console.print(f"\nDashboard will be available at: [bold blue]{grafana_url}/dashboards[/]")
+
+        if promtail_running:
+            console.print(
+                "\n[bold yellow]Note:[/] You may need to restart Promtail to pick up the configuration changes:"
+            )
+            console.print("  [bold]lokikit stop --force[/] and [bold]lokikit start[/]")
+    else:
+        console.print("\n[bold yellow]Note:[/] Start Lokikit services to use the dashboard:")
+        console.print("  [bold]lokikit start[/]")

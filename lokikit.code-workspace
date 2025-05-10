@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../.lokikit"
+		}
+	],
+	"settings": {
+		"python.languageServer": "None"
+	}
+}

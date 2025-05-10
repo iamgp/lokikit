@@ -819,9 +819,9 @@ def test_stop_command_with_force(mock_exit, mock_remove, mock_exists, mock_stop,
     stop_command(ctx, True)
 
     # Test mock_stop was called with the right parameters
-    assert (
-        mock_stop.call_count == 1
-    ), f"Expected stop_services to be called once but was called {mock_stop.call_count} times"
+    assert mock_stop.call_count == 1, (
+        f"Expected stop_services to be called once but was called {mock_stop.call_count} times"
+    )
 
     # Get the actual args that were passed
     args, kwargs = mock_stop.call_args

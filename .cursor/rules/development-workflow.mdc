@@ -1,0 +1,65 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+---
+description: Development workflow and environment setup for this Python project
+globs: "**/*.py"
+alwaysApply: false
+---
+# Python Development Workflow
+
+This document outlines the critical development practices and tooling requirements for this project.
+
+## Environment Setup
+
+- **Installation**: This project is intended to be used via `uv tools install X`, but can be developed using `uv`.
+- **Virtual Environment**: A virtual environment must be used with `uv`.
+  - This is typically already created, but check if package-related errors occur.
+  - To create a new virtual environment: `uv venv`
+  - To activate: `source .venv/bin/activate` (Unix) or `.venv\Scripts\activate` (Windows)
+
+## Package Management
+
+- **Adding Dependencies**: Packages MUST be added using `uv add X`
+  - For development dependencies: `uv add --dev X`
+  - Consider using dependency groups when appropriate: `uv add --group [group_name] X`
+- **Updating Dependencies**: Use `uv pip compile` to update dependency lockfiles
+
+## Development Workflow
+
+1. **Starting a New Task**:
+   - Update your local repository: `git pull`
+   - Create a new branch: `git checkout -b feat/feature-name` or `git checkout -b fix/bug-name`
+   - Ensure dependencies are up-to-date: `uv pip sync`
+
+2. **During Development**:
+   - Commit often when sub-tasks are complete
+   - Use conventional commits:
+     ```
+     feat: add user authentication
+     fix: resolve dependency conflict
+     docs: update installation instructions
+     test: add tests for user service
+     refactor: improve error handling logic
+     chore: update dev dependencies
+     ```
+
+3. **Before Committing**:
+   - Run linters, type checking, and tests:
+     ```
+     ruff check .
+     basedpyright
+     pytest
+     ```
+   - All checks MUST pass with no errors
+   - Fix any issues before proceeding
+
+## Code Quality Enforcement
+
+- **Linting**: All code must pass `ruff check .` without errors
+- **Type Checking**: All code must pass `basedpyright` without errors
+- **Testing**: All tests must pass with `pytest`
+  - No tests should be skipped or disabled without documented reason
+  - New features must include appropriate test coverage
